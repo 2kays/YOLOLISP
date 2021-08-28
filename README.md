@@ -2,7 +2,7 @@
 
 An s-expression based syntax for [Starbase](https://www.starbasegame.com)'s [YOLOL programming language](https://wiki.starbasegame.com/index.php/YOLOL).
 
-Implementation is an compiler for YOLOLISP, targeting YOLOL.
+Implementation is a compiler for YOLOLISP, targeting YOLOL.
 
 Written in Emacs Lisp (...I was too lazy to set up a Common Lisp environment)
 
@@ -39,6 +39,6 @@ Usage: currently only invokable within Emacs. Use the `yl` macro like so:
 ### TODO
 
 * Support full YOLOL functionality
-* Clean up the unary operator
+* Clean up the unary operator code
 * Add script minification and script size warnings
-*  ( as Emacs allows :) )
+* Improve tool accessibility (...at least as far as Emacs allows!)
