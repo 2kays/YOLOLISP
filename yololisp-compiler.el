@@ -64,31 +64,31 @@ Optional `LEVEL' refers to nesting level, determining parenthesis use in nested 
 ;; 10" or "if a = 1 then b = 1 end". The compiler outputs lists of these YOLOL
 ;; chunks, which can then be rearranged to meet chip code size limits.
 
-(defun yl-join-do-result (forms &optional separator)
+(defun yl-join-chunks (forms &optional separator)
   "Joins the compilation result (`FORMS') of YOLOLISP's DO form.
 
 Accepts an optional `SEPARATOR' string."
-  (mapconcat #'identity (-flatten forms) (or separator " ")))
+  (s-join (or separator " ") (-flatten forms)))
 
 (defun yl-compile-if (condition tbranch &optional fbranch)
   ""
   ;; Branches are compiled with YL-COMPILE-FORM, and the resulting chunks are
-  ;; joined with YL-JOIN-DO-RESULT. We join because YOLOL's IF constrains the
+  ;; joined with YL-JOIN-CHUNKS. We join because YOLOL's IF constrains the
   ;; branch code to a single line, so we have to treat IF as a single "chunk",
-  ;; even though its subforms are also chunks.
+  ;; even though the branch code consists of viable chunks.
   ;; (...in future we ought to retain the chunks for analysis reasons)
   (if fbranch
       (concat "if "
               (yl-compile-expr condition)
               " then "
-              (yl-join-do-result (yl-compile-form tbranch))
+              (yl-join-chunks (yl-compile-form tbranch))
               " else "
-              (yl-join-do-result (yl-compile-form fbranch))
+              (yl-join-chunks (yl-compile-form fbranch))
               " end")
     (concat "if "
             (yl-compile-expr condition)
             " then "
-            (yl-join-do-result (yl-compile-form tbranch))
+            (yl-join-chunks (yl-compile-form tbranch))
             " end")))
 
 (defun yl-compile-assign (var expr)
