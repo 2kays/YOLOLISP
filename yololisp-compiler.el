@@ -148,40 +148,50 @@ Accepts an optional `SEPARATOR' string."
 ;; CODE SIZE CONSTRAINER / CHUNK REARRANGER
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defun chunk-rearranger (chunks)
-  "Rearranges compiler output `CHUNKS' into 70-column width."
-  ;; FIXME: indecipherable LOOP black magic
-  ;; FIXME: every line has a space at the end (the `amended' var is a hack!!)
-  (cl-loop with flattened = (-flatten chunks)
-           with amended = (append (mapcar (lambda (s) (concat s " ")) (butlast flattened))
-                                  (last flattened))
-           with accum = 0
-           with lizt = (list nil)
-           for elem in amended
-           do
-           (if (> (+ accum (length elem)) 70)
-               (progn
-                 (print (concat "Stopped at " (number-to-string accum)))
-                 (setq accum (length elem))
-                 (setf (car lizt) (nreverse (car lizt)))
-                 (push nil lizt)
-                 (push elem (car lizt)))
-             (cl-incf accum (length elem))
-             (push elem (car lizt)))
-           finally return (nreverse lizt)))
+(defun chunk-rearranger (chunks &optional column-width)
+  "Rearranges compiler output `CHUNKS' into `COLUMN-WIDTH' columns (default 70).
+Returns a list of lists of chunks constrained to columns, ready
+for concatenation into an output YOLOLISP file."
+  (cl-loop
+   ;; CONSTRAINED-CHUNK-LISTS is a list of chunk lists that are
+   ;; column-constrained. Each entry corresponds to a line of output YOLOL.
+   with constrained-chunk-lists = (list nil)
+
+   ;; Loop over all of our chunks. Chunk nesting order is not important to us
+   ;; here, so we flatten away the hierarchy.
+   for current-chunk in (-flatten chunks)
+
+   for current-line-chunks = (car constrained-chunk-lists)
+   ;; sum current line's chunks and factor in spacing to get total line's length
+   ;; (the final chunk has no space appended, hence the 1-)
+   for total-line-length = (+ (-sum (mapcar #'length current-line-chunks))
+                              (1- (length current-line-chunks)))
+
+   ;; when we exceed the current line's column limit, create a new line, and
+   ;; repoint to it
+   when (>= (+ total-line-length (length current-chunk)) (or column-width 70))
+   do
+     (push nil constrained-chunk-lists)
+
+   ;; and finally, add the chunk to the appropriate line
+   do
+     (push current-chunk (car constrained-chunk-lists))
+
+   ;; correct the ordering of all of these pushes by reversing everything
+   finally return (nreverse (mapcar #'nreverse constrained-chunk-lists))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; CONVENIENCE MACROS
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defun yl-fn (forms)
-  (cl-flet ((join (l) (mapconcat #'identity l ""))
-            (join-line  (l) (mapconcat #'identity l "\n")))
-    (join-line
-     (mapcar #'join (chunk-rearranger (yl-compile-form forms))))))
+  (princ
+   (let ((constrained-chunk-lists (chunk-rearranger (yl-compile-form forms))))
+     (s-join "\n" (mapcar (-partial #'s-join " ") constrained-chunk-lists))))
+  nil)
 
 (defmacro yl (&rest forms)
-  `(yl-fn ',forms))
+  `(yl-fn ',@forms))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; TESTING
