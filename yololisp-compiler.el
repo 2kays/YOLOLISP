@@ -52,7 +52,7 @@ Optional `LEVEL' refers to nesting level, determining parenthesis use in nested 
                 (concat "(" result ")")
               result)))
     (symbol  (symbol-name expr))
-    (string  (concat "\"" expr "\""))
+    (string  (s-replace-all '(("\n" . "\\n")) (concat "\"" expr "\"")))
     (integer (number-to-string expr))
     (float   (number-to-string expr))))
 
