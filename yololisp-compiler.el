@@ -208,7 +208,7 @@ for concatenation into an output YOLOLISP file."
   `(princ (yl-fn '(do ,@forms)) nil))
 
 (defmacro yl* (&rest forms)
-  `(-flatten (chunk-rearranger (yl-compile-form '(do ,@forms)))))
+  `(chunk-rearranger (yl-compile-form '(do ,@forms))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; TESTING
@@ -225,15 +225,31 @@ for concatenation into an output YOLOLISP file."
 
 ;; primitive statement compiler tests
 (progn
-  (yl--test (yl* (assign a 1) (assign b 2)) '("a = 1" "b = 2"))
-  (yl--test (yl* (if (= a 10) (assign b 4))) '("if a = 10 then b = 4 end"))
-  (yl--test (yl* (assign :a 10) (// "Comment!")) '(":a = 10" "//Comment!"))
-  (yl--test (yl* (op-assign z * 2)) '("z *= 2"))
+  (yl--test (yl* (assign a 1) (assign b 2)) '(("a = 1" "b = 2")))
+  (yl--test (yl* (if (= a 10) (assign b 4))) '(("if a = 10 then b = 4 end")))
+  (yl--test (yl* (assign :a 10) (// "Comment!")) '((":a = 10" "//Comment!")))
+  (yl--test (yl* (op-assign z * 2)) '(("z *= 2")))
   t)
 
 ;; macro expansion tests
 (progn
-  (yl--test (yl* (set a 1 b 2)) '("a = 1" "b = 2"))
-  (yl--test (yl* (set z (* z 2))) '("z *= 2"))
-  (yl--test (yl* (set :y (+ :y (* z 2)))) '(":y += z * 2"))
+  (yl--test (yl* (set a 1 b 2)) '(("a = 1" "b = 2")))
+  (yl--test (yl* (set z (* z 2))) '(("z *= 2")))
+  (yl--test (yl* (set :y (+ :y (* z 2)))) '((":y += z * 2")))
   t)
+
+;; rearrangement tests
+(progn
+  (yl--test (yl* (//-line-length) (//-line-length))'
+            (("// <-------------- this line is 70 characters long ------------------>")
+             ("// <-------------- this line is 70 characters long ------------------>")))
+  (yl--test (yl* (set A 1000 pr 0 div (* (+ 9.6 (* 2.4 pr)) n) so (- 1 sp)
+                      o 160000000 e (* 8 o)))
+            '(("A = 1000" "pr = 0" "div = (9.6 + (2.4 * pr)) * n" "so = 1 - sp"
+               "o = 160000000")
+              ("e = 8 * o")))
+  (yl--test (yl* (set A 1000 pr 0 div (* (+ 9.6 (* 2.4 pr)) n) so (- 1 sp)
+                      o 1600000000 e (* 8 o)))
+            '(("A = 1000" "pr = 0" "div = (9.6 + (2.4 * pr)) * n" "so = 1 - sp")
+              ("o = 1600000000" "e = 8 * o")))
+  )
