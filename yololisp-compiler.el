@@ -94,6 +94,11 @@ Accepts an optional `SEPARATOR' string."
 (defun yl-compile-assign (var expr)
   (concat (symbol-name var) " = " (yl-compile-expr expr)))
 
+(defun yl-compile-op-assign (var op expr)
+  (cl-ecase op
+    ((+ - * /)
+     (concat (symbol-name var) (format " %s= " op) (yl-compile-expr expr)))))
+
 (defun yl-compile-goto (expr)
   (concat "goto " (yl-compile-expr expr)))
 
@@ -111,6 +116,7 @@ Accepts an optional `SEPARATOR' string."
         (do     (yl-compile-do (cdr form)))
         (if     (list (yl-compile-if (cadr form) (caddr form) (cadddr form))))
         (assign (list (yl-compile-assign  (cadr form) (caddr form))))
+        (op-assign (list (yl-compile-op-assign (cadr form) (caddr form) (cadddr form))))
         (goto   (list (yl-compile-goto    (cadr form))))
         (//     (list (yl-compile-comment (cadr form))))))))
 
@@ -124,9 +130,19 @@ Accepts an optional `SEPARATOR' string."
 (defun yl-macro-unless (form)
   `(if (! ,(cadr form)) ,(caddr form)))
 
+(defun yl-transform-assign-pair (pair)
+  (let* ((var    (car pair))
+         (rvalue (cadr pair))
+         ;; Pull out a potential assign operator
+         (assign-op (when (and (consp rvalue) (eq var (cadr rvalue)))
+                      (car rvalue))))
+    (if assign-op
+        (list 'op-assign var assign-op (caddr rvalue))
+      (list 'assign var rvalue))))
+
 (defun yl-macro-set (form)
   (let* ((pairs (-partition-all 2 (cdr form)))
-         (assign-pairs (mapcar (lambda (pair) (cons 'assign pair)) pairs)))
+         (assign-pairs (mapcar #'yl-transform-assign-pair pairs)))
     `(do ,@assign-pairs)))
 
 (defun yl-macro-comment-line-length (form)
@@ -185,13 +201,14 @@ for concatenation into an output YOLOLISP file."
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defun yl-fn (forms)
-  (princ
-   (let ((constrained-chunk-lists (chunk-rearranger (yl-compile-form forms))))
-     (s-join "\n" (mapcar (-partial #'s-join " ") constrained-chunk-lists))))
-  nil)
+  (let ((constrained-chunk-lists ))
+    (s-join "\n" (mapcar (-partial #'s-join " ") constrained-chunk-lists))))
 
 (defmacro yl (&rest forms)
-  `(yl-fn ',@forms))
+  `(princ (yl-fn '(do ,@forms)) nil))
+
+(defmacro yl* (&rest forms)
+  `(-flatten (chunk-rearranger (yl-compile-form '(do ,@forms)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; TESTING
@@ -200,20 +217,23 @@ for concatenation into an output YOLOLISP file."
 (defun yl--test (form expected)
   (cl-assert (equal form expected)))
 
+;; expr compiler tests
 (progn
-  ;; expr compiler tests
   (yl--test (yl-compile-expr '(== a (+ (+ 10 10) (+ 12 11)))) "a == ((10 + 10) + (12 + 11))")
   (yl--test (yl-compile-expr '(== :a :b)) ":a == :b")
   t)
 
 ;; primitive statement compiler tests
 (progn
-  (yl--test (yl-compile-form '(do (assign a 1) (assign b 2))) '(("a = 1") ("b = 2")))
-  (yl--test (yl-compile-form '(do (if (= a 10) (assign b 4)))) '(("if a = 10 then b = 4 end")))
-  (yl--test (yl-compile-form '(do (assign :a 10) (// "Comment!"))) '((":a = 10") ("//Comment!")))
+  (yl--test (yl* (assign a 1) (assign b 2)) '("a = 1" "b = 2"))
+  (yl--test (yl* (if (= a 10) (assign b 4))) '("if a = 10 then b = 4 end"))
+  (yl--test (yl* (assign :a 10) (// "Comment!")) '(":a = 10" "//Comment!"))
+  (yl--test (yl* (op-assign z * 2)) '("z *= 2"))
   t)
 
 ;; macro expansion tests
 (progn
-  (yl--test (yl-compile-form '(set a 1 b 2)) '(("a = 1") ("b = 2")))
+  (yl--test (yl* (set a 1 b 2)) '("a = 1" "b = 2"))
+  (yl--test (yl* (set z (* z 2))) '("z *= 2"))
+  (yl--test (yl* (set :y (+ :y (* z 2)))) '(":y += z * 2"))
   t)
