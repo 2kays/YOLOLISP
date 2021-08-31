@@ -38,7 +38,13 @@ Usage: currently only invokable within Emacs. Use the `yl` macro like so:
 
 ### TODO
 
-* Support full YOLOL functionality
-* Clean up the unary operator code
-* Add script minification and script size warnings
-* Improve tool accessibility (...at least as far as Emacs allows!)
+ * Support full YOLOL functionality
+ * Clean up the unary operator code
+ * Add script minification and script size warnings
+   * Constrain code to 70-length column **[DONE]**
+   * Warn when script longer than 20 lines
+   * Remove/strip unneccessary whitespace
+ * Improve tool accessibility (...at least as far as Emacs allows!)
+ * `set` macro should infer +=, -=, *=, /= **[DONE]**
+ * Operator precedence - YOLOLISP over-parenthesizes output expressions
+ * Constant folding in expressions
