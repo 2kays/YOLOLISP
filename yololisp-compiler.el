@@ -197,6 +197,32 @@ for concatenation into an output YOLOLISP file."
    finally return (nreverse (mapcar #'nreverse constrained-chunk-lists))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; OPTIMIZER
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defun yl-optimize (form)
+  ;; TODO: framework here
+  form)
+
+(defun yl-optimize-if (form)
+  "Optimise an IF `form'. Looks for common usage patterns and
+  converts them to a branchless form."
+  (let ((condition (cadr   form))
+        (tbranch   (caddr  form))
+        (fbranch   (cadddr form)))
+    (if (and (yl-integer-p condition)
+             (eq (cadr tbranch) (cadr fbranch))
+             (eq 'assign (car tbranch))
+             (yl-integer-p (caddr tbranch))
+             (eq 'assign (car fbranch))
+             (yl-integer-p (caddr tbranch)))
+        (let ((s (cadr  form))
+              (a (caddr fbranch))
+              (b (caddr tbranch)))
+          `(assign ,(cadr tbranch) (^ (* ,a 0) (* (+ ,s ,b) ,s))))
+      form)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; CONVENIENCE MACROS
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -252,4 +278,14 @@ for concatenation into an output YOLOLISP file."
                       o 1600000000 e (* 8 o)))
             '(("A = 1000" "pr = 0" "div = (9.6 + (2.4 * pr)) * n" "so = 1 - sp")
               ("o = 1600000000" "e = 8 * o")))
-  )
+  t)
+
+;; optimizer tests
+(progn
+  ;; ;; ENABLE WHEN WE HAVE DECLARE AND IF-OPTIMIZATION
+  ;; (yl--test (yl*
+  ;;            (do
+  ;;             (declare (type integer cond res a b))
+  ;;             (if cond (assign res b) (assign res a))))
+  ;;           '("res = (a * 0) ^ ((cond + b) * cond)"))
+  t)
