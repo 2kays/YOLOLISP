@@ -201,11 +201,11 @@ for concatenation into an output YOLOLISP file."
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defun yl-fn (forms)
-  (let ((constrained-chunk-lists ))
-    (s-join "\n" (mapcar (-partial #'s-join " ") constrained-chunk-lists))))
+  (let ((chunk-lists (chunk-rearranger (yl-compile-form forms))))
+    (s-join "\n" (mapcar (-partial #'s-join " ") chunk-lists))))
 
 (defmacro yl (&rest forms)
-  `(princ (yl-fn '(do ,@forms)) nil))
+  `(progn (princ (yl-fn '(do ,@forms))) nil))
 
 (defmacro yl* (&rest forms)
   `(chunk-rearranger (yl-compile-form '(do ,@forms))))

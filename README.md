@@ -48,3 +48,8 @@ Usage: currently only invokable within Emacs. Use the `yl` macro like so:
  * `set` macro should infer +=, -=, *=, /= **[DONE]**
  * Operator precedence - YOLOLISP over-parenthesizes output expressions
  * Constant folding in expressions
+ * DECLARE form: specify YOLOL chip, types, optimisations, etc.
+ * Optimisation step
+   * Optimiser framework (as a precompilation stage!)
+   * Type declarations (for guiding the hand of the optimiser)
+   * Branchless optimisations for conditionals
