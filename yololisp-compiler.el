@@ -274,37 +274,38 @@ for concatenation into an output YOLOLISP file."
   (or (and (yl-get-expr-type-tag expr) (cadr expr))
       expr))
 
-;; (defun yl-integer-p (expr)
-;;   (eq (yl-get-expr-type expr) 'integer))
-
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; OPTIMIZER: CONDITIONALS (IF)
+;;
+;;  * Transform: `if s then r = b else r = a end`
+;;  *     Where: int(a) && int(b) && int(c)
+;;  *    Output: `r = (a * 0)^(s + b * s)`
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; (defun yl-optimize (form)
-;;   (let ((sym (car form)))
-;;     (cl-case sym
-;;       (do (yl-optimize-do (cdr form)))
-;;       (if (yl-optimize-if (cadr form) (caddr form) (cadddr form)))
-;;       ;; (do     (yl-compile-do (cdr form)))
-;;       ;; (assign (list (yl-compile-assign  (cadr form) (caddr form))))
-;;       ;; (op-assign (list (yl-compile-op-assign (cadr form) (caddr form) (cadddr form))))
-;;       ;; (goto   (list (yl-compile-goto    (cadr form))))
-;;       ;; (//     (list (yl-compile-comment (cadr form))))
-;;       (otherwise form))))
+(defun yl-integer-p (expr)
+  (eq (yl-get-expr-type-tag expr) 'integer))
 
-;; (defun yl-optimize-if (condition tbranch fbranch)
-;;   "Optimise an IF `form'. Looks for common usage patterns and
-;;   converts them to a branchless form."
-;;   (if (and (yl-integer-p condition)
-;;            (eq (cadr tbranch) (cadr fbranch))
-;;            (eq 'assign (car tbranch))
-;;            (yl-integer-p (caddr tbranch))
-;;            (eq 'assign (car fbranch))
-;;            (yl-integer-p (caddr tbranch)))
-;;       (let ((s (cadr  form))
-;;             (a (caddr fbranch))
-;;             (b (caddr tbranch)))
-;;         `(assign ,(cadr tbranch) (^ (* ,a 0) (* (+ ,s ,b) ,s))))
-;;     form))
+(defun yl-optimize-shortcut-if (condition tbranch fbranch)
+  "Optimise an IF `form'. Looks for common usage patterns and
+  converts them to a branchless form."
+  (if (and (yl-integer-p condition)
+           (eq (cadr tbranch) (cadr fbranch))
+           (eq 'assign (car tbranch))
+           (yl-integer-p (caddr tbranch))
+           (eq 'assign (car fbranch))
+           (yl-integer-p (caddr tbranch)))
+      (let ((s (cadr (cadr  form)))
+            (a (cadr (caddr fbranch)))
+            (b (cadr (caddr tbranch))))
+        `(assign ,(cadr tbranch) (+ (* ,a (^ 0 ,s)) (* ,b ,s))))
+    form))
+
+(defun yl-optimize-shortcuts (form)
+  (let ((sym (car form)))
+    (cl-case sym
+      (do `(do ,@(mapcar #'yl-optimize-shortcuts (cdr form))))
+      (if (yl-optimize-shortcut-if (cadr form) (caddr form) (cadddr form)))
+      (otherwise form))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; OPTIMIZER: TYPE TAG STRIPPER
@@ -340,6 +341,7 @@ for concatenation into an output YOLOLISP file."
   (-> forms
       ;; Optimization
       (yl-type-tagger-optimize)
+      (yl-optimize-shortcuts)
 
       ;; Optimization cleanup
       (yl-tag-stripper-optimize)
@@ -408,10 +410,11 @@ for concatenation into an output YOLOLISP file."
 (progn
   (let ((form '(if (= a 10) (do (assign b 4) (assign c 3)))))
     (yl--test form (yl-tag-stripper-optimize (yl-type-tagger-optimize form))))
-  ;; ;; ENABLE WHEN WE HAVE DECLARE AND IF-OPTIMIZATION
-  ;; (yl--test (yl*
-  ;;            (do
-  ;;             (declare (type integer cond res a b))
-  ;;             (if cond (assign res b) (assign res a))))
-  ;;           '("res = (a * 0) ^ ((cond + b) * cond)"))
+
+  (yl--test (yl-type-tagger-optimize '(if 1 (assign b 2) (assign a 3)))
+            '(if (integer 1) (assign b (integer 2)) (assign a (integer 3))))
+
+  (yl--test (yl* (if 1 (assign r 2) (assign r 3))) '(("r = (3 * (0 ^ 1)) + (2 * 1)")))
+  (yl--test (yl* (if 0 (assign r 2) (assign r 3))) '(("r = (3 * (0 ^ 0)) + (2 * 0)")))
+
   t)
