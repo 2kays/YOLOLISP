@@ -322,6 +322,14 @@ for concatenation into an output YOLOLISP file."
                         (list fbranch))))
       (otherwise form))))
 
+(defun yl-declare-stripper-optimize (form)
+  (let ((sym (car form)))
+    (cl-case sym
+      (do (if (eq (caadr form) 'declare)
+              `(do ,@(cddr form))
+            form))
+      (otherwise form))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; CONVENIENCE MACROS
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -330,7 +338,11 @@ for concatenation into an output YOLOLISP file."
   (-> forms
       ;; Optimization
       (yl-type-tagger-optimize)
+
+      ;; Optimization cleanup
       (yl-tag-stripper-optimize)
+      (yl-declare-stripper-optimize)
+
       ;; Compilation
       (yl-compile-form)
       ;; Output formatting
