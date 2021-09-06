@@ -244,7 +244,9 @@ for concatenation into an output YOLOLISP file."
 (defun yl-try-type-tag (sym)
   (if-let ((var-type (yl-lookup-var-type sym)))
       (list var-type sym)
-    sym))
+    (if (integerp sym)
+        `(integer ,sym)
+      sym)))
 
 (defun yl-type-tagger-optimize-do (forms)
   (with-decl-env (forms)
