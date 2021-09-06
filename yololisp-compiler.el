@@ -197,44 +197,154 @@ for concatenation into an output YOLOLISP file."
    finally return (nreverse (mapcar #'nreverse constrained-chunk-lists))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; OPTIMIZER
+;; MULTIPASS OPTIMIZER
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; TYPE TAGGER PASS
+;;  * Uses declaration env (DECLARE) to tag expressions with types
+;;  * Type tags will be used in later optimisations
+;;
+;; TYPE-TAG STRIP PASS
+;;  * Removes all type tags from code
+;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defun yl-optimize (form)
-  ;; TODO: framework here
-  form)
+(defvar *declarations* nil
+  "The declaration environment.")
 
-(defun yl-optimize-if (form)
-  "Optimise an IF `form'. Looks for common usage patterns and
-  converts them to a branchless form."
-  (let ((condition (cadr   form))
-        (tbranch   (caddr  form))
-        (fbranch   (cadddr form)))
-    (if (and (yl-integer-p condition)
-             (eq (cadr tbranch) (cadr fbranch))
-             (eq 'assign (car tbranch))
-             (yl-integer-p (caddr tbranch))
-             (eq 'assign (car fbranch))
-             (yl-integer-p (caddr tbranch)))
-        (let ((s (cadr  form))
-              (a (caddr fbranch))
-              (b (caddr tbranch)))
-          `(assign ,(cadr tbranch) (^ (* ,a 0) (* (+ ,s ,b) ,s))))
-      form)))
+(defun yl-get-declarations (kind)
+  (mapcar #'cdr
+          (mapcan
+           (lambda (decls)
+             (-filter (lambda (spec) (eq (car spec) kind)) decls))
+           *declarations*)))
+
+(cl-defmacro with-decl-env ((forms) &body body)
+  `(let ((*declarations*
+          (or (and (eq 'declare (caar forms))
+                   (cons (cdar forms) *declarations*))
+              *declarations*)))
+     ,@body))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; OPTIMIZER: TYPE TAGGER
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defun yl-lookup-var-type (sym)
+  "Look up the type of `SYM' in the declaration environment."
+  (let* ((type-decls (yl-get-declarations 'type))
+         (var-lookup (mapcan
+                      (lambda (entry)
+                        (let ((type (car entry))
+                              (vars (cdr entry)))
+                          (mapcar (-partial #'cons type) vars)))
+                      type-decls)))
+    (car (rassoc sym var-lookup))))
+
+(defun yl-try-type-tag (sym)
+  (if-let ((var-type (yl-lookup-var-type sym)))
+      (list var-type sym)
+    sym))
+
+(defun yl-type-tagger-optimize-do (forms)
+  (with-decl-env (forms)
+    (mapcar #'yl-type-tagger-optimize forms)))
+
+(defun yl-type-tagger-optimize (form)
+  (let ((sym (car form)))
+    (cl-case sym
+      (do        `(do ,@(yl-type-tagger-optimize-do (cdr form))))
+      (assign    (-replace-at 2 (yl-try-type-tag (caddr form)) form))
+      (op-assign (-replace-at 3 (yl-try-type-tag (cadddr form)) form))
+      (goto      (-replace-at 1 (yl-try-type-tag (cadr form)) form))
+      (if        `(if ,(yl-try-type-tag (cadr form))
+                      ,(yl-type-tagger-optimize (caddr form))
+                    ;; conditionally splice in the fbranch if it exists
+                    ,@(when-let ((fbranch (yl-type-tagger-optimize (cadddr form))))
+                        (list fbranch))))
+      (otherwise form))))
+
+(defun yl-get-expr-type-tag (expr)
+  (and (consp expr)
+       (car (member (car expr) '(integer float string)))))
+
+(defun yl-ignore-expr-type-tag (expr)
+  (or (and (yl-get-expr-type-tag expr) (cadr expr))
+      expr))
+
+;; (defun yl-integer-p (expr)
+;;   (eq (yl-get-expr-type expr) 'integer))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; (defun yl-optimize (form)
+;;   (let ((sym (car form)))
+;;     (cl-case sym
+;;       (do (yl-optimize-do (cdr form)))
+;;       (if (yl-optimize-if (cadr form) (caddr form) (cadddr form)))
+;;       ;; (do     (yl-compile-do (cdr form)))
+;;       ;; (assign (list (yl-compile-assign  (cadr form) (caddr form))))
+;;       ;; (op-assign (list (yl-compile-op-assign (cadr form) (caddr form) (cadddr form))))
+;;       ;; (goto   (list (yl-compile-goto    (cadr form))))
+;;       ;; (//     (list (yl-compile-comment (cadr form))))
+;;       (otherwise form))))
+
+;; (defun yl-optimize-if (condition tbranch fbranch)
+;;   "Optimise an IF `form'. Looks for common usage patterns and
+;;   converts them to a branchless form."
+;;   (if (and (yl-integer-p condition)
+;;            (eq (cadr tbranch) (cadr fbranch))
+;;            (eq 'assign (car tbranch))
+;;            (yl-integer-p (caddr tbranch))
+;;            (eq 'assign (car fbranch))
+;;            (yl-integer-p (caddr tbranch)))
+;;       (let ((s (cadr  form))
+;;             (a (caddr fbranch))
+;;             (b (caddr tbranch)))
+;;         `(assign ,(cadr tbranch) (^ (* ,a 0) (* (+ ,s ,b) ,s))))
+;;     form))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; OPTIMIZER: TYPE TAG STRIPPER
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defun yl-tag-stripper-optimize (form)
+  (let ((sym (car form)))
+    (cl-case sym
+      (do        `(do ,@(mapcar #'yl-tag-stripper-optimize (cdr form))))
+      (assign    (-replace-at 2 (yl-ignore-expr-type-tag (caddr form)) form))
+      (op-assign (-replace-at 3 (yl-ignore-expr-type-tag (cadddr form)) form))
+      (goto      (-replace-at 1 (yl-ignore-expr-type-tag (cadr form)) form))
+      (if        `(if ,(yl-ignore-expr-type-tag (cadr form))
+                      ,(yl-tag-stripper-optimize (caddr form))
+                    ;; conditionally splice in the fbranch if it exists
+                    ,@(when-let ((fbranch (yl-tag-stripper-optimize (cadddr form))))
+                        (list fbranch))))
+      (otherwise form))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; CONVENIENCE MACROS
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defun yl-fn (forms)
-  (let ((chunk-lists (chunk-rearranger (yl-compile-form forms))))
-    (s-join "\n" (mapcar (-partial #'s-join " ") chunk-lists))))
+  (-> forms
+      ;; Optimization
+      (yl-type-tagger-optimize)
+      (yl-tag-stripper-optimize)
+      ;; Compilation
+      (yl-compile-form)
+      ;; Output formatting
+      (chunk-rearranger)))
 
 (defmacro yl (&rest forms)
-  `(progn (princ (yl-fn '(do ,@forms))) nil))
+  `(prog1 nil
+     (->> (yl-fn '(do ,@forms))
+          (mapcar (-partial #'s-join " "))
+          (s-join "\n")
+          princ)))
 
 (defmacro yl* (&rest forms)
-  `(chunk-rearranger (yl-compile-form '(do ,@forms))))
+  `(yl-fn '(do ,@forms)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; TESTING
@@ -282,6 +392,8 @@ for concatenation into an output YOLOLISP file."
 
 ;; optimizer tests
 (progn
+  (let ((form '(if (= a 10) (do (assign b 4) (assign c 3)))))
+    (yl--test form (yl-tag-stripper-optimize (yl-type-tagger-optimize form))))
   ;; ;; ENABLE WHEN WE HAVE DECLARE AND IF-OPTIMIZATION
   ;; (yl--test (yl*
   ;;            (do
