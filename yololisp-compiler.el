@@ -329,8 +329,8 @@ for concatenation into an output YOLOLISP file."
   (let ((sym (car form)))
     (cl-case sym
       (do (if (eq (caadr form) 'declare)
-              `(do ,@(cddr form))
-            form))
+              `(do ,@(mapcar #'yl-declare-stripper-optimize (cddr form)))
+            `(do ,@(mapcar #'yl-declare-stripper-optimize (cdr form)))))
       (otherwise form))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
