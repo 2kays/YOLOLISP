@@ -36,20 +36,51 @@ Usage: currently only invokable within Emacs. Use the `yl` macro like so:
   (set b a))
 ```
 
+### Goals
+
+ * Support full YOLOL functionality across different chip types
+ * Create a reasonably good optimizing and minifying compiler
+ * Obtain a good level of documentation and usability
+
 ### TODO
 
- * Support full YOLOL functionality
- * Clean up the unary operator code
  * Add script minification and script size warnings
    * Constrain code to 70-length column **[DONE]**
    * Warn when script longer than 20 lines
    * Remove/strip unneccessary whitespace
- * Improve tool accessibility (...at least as far as Emacs allows!)
- * `set` macro should infer +=, -=, *=, /= **[DONE]**
- * Operator precedence - YOLOLISP over-parenthesizes output expressions
- * Constant folding in expressions
- * DECLARE form: specify YOLOL chip, types, optimisations, etc.
- * Optimisation step
-   * Optimiser framework (as a precompilation stage!)
-   * Type declarations (for guiding the hand of the optimiser)
-   * Branchless optimisations for conditionals
+     * In assigments **[DONE]**
+     * After function calls
+     * Within `if` conditionals
+   * Output operator precedence - YOLOLISP over-parenthesizes output expressions
+
+ * DECLARE form: specify YOLOL chip, types, optimizations, etc.
+   * Declaration environment setup **[DONE]**
+   * Type declarations **[DONE]**
+   * Optimization declarations
+   * Chip/function/column constraints declarations
+
+ * Optimization
+   * Optimizer framework (as a precompilation stage!) **[DONE]**
+   * Low hanging fruit optimizations:
+     * Basic constant folding within expressions
+     * Branchless optimizations for conditionals *[IN PROGRESS]*
+
+ * Compiler usability and accessibility
+   * Replace ELPA/MELPA dependencies with built-in Emacs stuff **[DONE]**
+   * Create a compiler entrypoint shell script
+   * Useful compilation error messages
+
+ * Misc. features:
+   * `set` macro should infer +=,-=,*=,/= **[DONE]**
+   * More useful macros and utilities
+   * Interface with some YOLOL emulators
+   * An Emacs YOLOLISP environment?
+   * Error-triggering for code speedup -- error handling system?
+   * Looping helper macros?
+
+ * Documentation, cleanup, maintenance
+   * Clean up the unary operator code...
+   * Actually add documentation!
+   * Function docstrings
+   * ELISP code style compliance
+   * Split into multiple files
