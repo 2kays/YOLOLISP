@@ -1,11 +1,17 @@
 ;; Some sort of YOLOL Lisp-compiler...
 
-(require 'cl-lib)
-(require 'seq)
 (eval-when-compile
   (require 'cl-lib)
   (require 'seq)
   (require 'subr-x))
+
+(defvar *yl-whitespaced-expressions* nil
+  "Direct the compiler to surround expressions with whitespace.")
+
+(defun yl-separator (&optional readablep)
+  (if (or *yl-whitespaced-expressions* readablep)
+      " "
+    ""))
 
 (defvar yl-unary-left
   '((neg . "-")
@@ -49,9 +55,9 @@ Optional `LEVEL' refers to nesting level, determining parenthesis use in nested 
                            ;; two-arg binary operation
                            (t
                             (concat (yl-compile-expr arg1 (1+ level))
-                                    " "
+                                    (yl-separator)
                                     (symbol-name op)
-                                    " "
+                                    (yl-separator)
                                     (yl-compile-expr arg2 (1+ level)))))
                           )))
             (if (> level 0)
@@ -100,12 +106,20 @@ Accepts an optional `SEPARATOR' string."
             " end")))
 
 (defun yl-compile-assign (var expr)
-  (concat (symbol-name var) " = " (yl-compile-expr expr)))
+  (concat (symbol-name var)
+          (yl-separator)
+          "="
+          (yl-separator)
+          (yl-compile-expr expr)))
 
 (defun yl-compile-op-assign (var op expr)
   (cl-ecase op
     ((+ - * /)
-     (concat (symbol-name var) (format " %s= " op) (yl-compile-expr expr)))))
+     (concat (symbol-name var)
+             (yl-separator)
+             (format "%s=" op)
+             (yl-separator)
+             (yl-compile-expr expr)))))
 
 (defun yl-compile-goto (expr)
   (concat "goto " (yl-compile-expr expr)))
@@ -378,23 +392,23 @@ for concatenation into an output YOLOLISP file."
 
 ;; expr compiler tests
 (progn
-  (yl--test (yl-compile-expr '(== a (+ (+ 10 10) (+ 12 11)))) "a == ((10 + 10) + (12 + 11))")
-  (yl--test (yl-compile-expr '(== :a :b)) ":a == :b")
+  (yl--test (yl-compile-expr '(== a (+ (+ 10 10) (+ 12 11)))) "a==((10+10)+(12+11))")
+  (yl--test (yl-compile-expr '(== :a :b)) ":a==:b")
   t)
 
 ;; primitive statement compiler tests
 (progn
-  (yl--test (yl* (assign a 1) (assign b 2)) '(("a = 1" "b = 2")))
-  (yl--test (yl* (if (= a 10) (assign b 4))) '(("if a = 10 then b = 4 end")))
-  (yl--test (yl* (assign :a 10) (// "Comment!")) '((":a = 10" "//Comment!")))
-  (yl--test (yl* (op-assign z * 2)) '(("z *= 2")))
+  (yl--test (yl* (assign a 1) (assign b 2)) '(("a=1" "b=2")) )
+  (yl--test (yl* (if (= a 10) (assign b 4))) '(("if a=10 then b=4 end")))
+  (yl--test (yl* (assign :a 10) (// "Comment!")) '((":a=10" "//Comment!")))
+  (yl--test (yl* (op-assign z * 2)) '(("z*=2")))
   t)
 
 ;; macro expansion tests
 (progn
-  (yl--test (yl* (set a 1 b 2)) '(("a = 1" "b = 2")))
-  (yl--test (yl* (set z (* z 2))) '(("z *= 2")))
-  (yl--test (yl* (set :y (+ :y (* z 2)))) '((":y += z * 2")))
+  (yl--test (yl* (set a 1 b 2)) '(("a=1" "b=2")))
+  (yl--test (yl* (set z (* z 2))) '(("z*=2")))
+  (yl--test (yl* (set :y (+ :y (* z 2)))) '((":y+=z*2")) )
   t)
 
 ;; rearrangement tests
@@ -403,25 +417,30 @@ for concatenation into an output YOLOLISP file."
             (("// <-------------- this line is 70 characters long ------------------>")
              ("// <-------------- this line is 70 characters long ------------------>")))
   (yl--test (yl* (set A 1000 pr 0 div (* (+ 9.6 (* 2.4 pr)) n) so (- 1 sp)
-                      o 160000000 e (* 8 o)))
-            '(("A = 1000" "pr = 0" "div = (9.6 + (2.4 * pr)) * n" "so = 1 - sp"
-               "o = 160000000")
-              ("e = 8 * o")))
+                      o 160000000 e (* 8 o) f 644444444 z (* 12 (* 25 A)) lol 1))
+            '(("A=1000" "pr=0" "div=(9.6+(2.4*pr))*n" "so=1-sp" "o=160000000" "e=8*o" "f=644444444")
+              ("z=12*(25*A)" "lol=1")))
   (yl--test (yl* (set A 1000 pr 0 div (* (+ 9.6 (* 2.4 pr)) n) so (- 1 sp)
-                      o 1600000000 e (* 8 o)))
-            '(("A = 1000" "pr = 0" "div = (9.6 + (2.4 * pr)) * n" "so = 1 - sp")
-              ("o = 1600000000" "e = 8 * o")))
+                      o 160000000 e (* 8 o) f 6444444444))
+            '(("A=1000" "pr=0" "div=(9.6+(2.4*pr))*n" "so=1-sp" "o=160000000" "e=8*o") ("f=6444444444")))
   t)
 
 ;; optimizer tests
 (progn
-  (let ((form '(if (= a 10) (do (assign b 4) (assign c 3)))))
-    (yl--test form (yl-tag-stripper-optimize (yl-type-tagger-optimize form))))
+  (let ((test-form '(if (= a 10) (do (assign b 4) (assign c 3)))))
+    (yl--test test-form (yl-tag-stripper-optimize (yl-type-tagger-optimize test-form))))
 
   (yl--test (yl-type-tagger-optimize '(if 1 (assign b 2) (assign a 3)))
             '(if (integer 1) (assign b (integer 2)) (assign a (integer 3))))
 
-  (yl--test (yl* (if 1 (assign r 2) (assign r 3))) '(("r = (3 * (0 ^ 1)) + (2 * 1)")))
-  (yl--test (yl* (if 0 (assign r 2) (assign r 3))) '(("r = (3 * (0 ^ 0)) + (2 * 0)")))
+  (yl--test (yl* (if 1 (assign r 2) (assign r 3))) '(("r=(3*(0^1))+(2*1)")) )
+  (yl--test (yl* (if 0 (assign r 2) (assign r 3))) '(("r=(3*(0^0))+(2*0)")) )
 
+  t)
+
+;; keep whitespace tests
+(progn
+  (let ((*yl-whitespaced-expressions* t))
+    (yl--test (yl* (if 1 (assign r 2) (assign r 3))) '(("r = (3 * (0 ^ 1)) + (2 * 1)")))
+    (yl--test (yl* (if 0 (assign r 2) (assign r 3))) '(("r = (3 * (0 ^ 0)) + (2 * 0)"))))
   t)
