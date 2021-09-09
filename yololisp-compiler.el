@@ -1,5 +1,12 @@
 ;; Some sort of YOLOL Lisp-compiler...
 
+(require 'cl-lib)
+(require 'seq)
+(eval-when-compile
+  (require 'cl-lib)
+  (require 'seq)
+  (require 'subr-x))
+
 (defvar yl-unary-left
   '((neg . "-")
     (sqrt . "sqrt ")
@@ -52,7 +59,7 @@ Optional `LEVEL' refers to nesting level, determining parenthesis use in nested 
                 (concat "(" result ")")
               result)))
     (symbol  (symbol-name expr))
-    (string  (s-replace-all '(("\n" . "\\n")) (concat "\"" expr "\"")))
+    (string  (replace-regexp-in-string "\n" "\\\\n" (concat "\"" expr "\"")))
     (integer (number-to-string expr))
     (float   (number-to-string expr))))
 
@@ -68,7 +75,8 @@ Optional `LEVEL' refers to nesting level, determining parenthesis use in nested 
   "Joins the compilation result (`FORMS') of YOLOLISP's DO form.
 
 Accepts an optional `SEPARATOR' string."
-  (s-join (or separator " ") (-flatten forms)))
+  ;; FIXME: FLATTEN-TREE may not be available in older Emacs versions
+  (string-join (flatten-tree forms) (or separator " ")))
 
 (defun yl-compile-if (condition tbranch &optional fbranch)
   ""
@@ -141,7 +149,7 @@ Accepts an optional `SEPARATOR' string."
       (list 'assign var rvalue))))
 
 (defun yl-macro-set (form)
-  (let* ((pairs (-partition-all 2 (cdr form)))
+  (let* ((pairs (seq-partition (cdr form) 2))
          (assign-pairs (mapcar #'yl-transform-assign-pair pairs)))
     `(do ,@assign-pairs)))
 
@@ -175,12 +183,12 @@ for concatenation into an output YOLOLISP file."
 
    ;; Loop over all of our chunks. Chunk nesting order is not important to us
    ;; here, so we flatten away the hierarchy.
-   for current-chunk in (-flatten chunks)
+   for current-chunk in (flatten-tree chunks)
 
    for current-line-chunks = (car constrained-chunk-lists)
    ;; sum current line's chunks and factor in spacing to get total line's length
    ;; (the final chunk has no space appended, hence the 1-)
-   for total-line-length = (+ (-sum (mapcar #'length current-line-chunks))
+   for total-line-length = (+ (seq-reduce #'+ (mapcar #'length current-line-chunks) 0)
                               (1- (length current-line-chunks)))
 
    ;; when we exceed the current line's column limit, create a new line, and
@@ -216,7 +224,7 @@ for concatenation into an output YOLOLISP file."
   (mapcar #'cdr
           (mapcan
            (lambda (decls)
-             (-filter (lambda (spec) (eq (car spec) kind)) decls))
+             (seq-filter (lambda (spec) (eq (car spec) kind)) decls))
            *declarations*)))
 
 (cl-defmacro with-decl-env ((forms) &body body)
@@ -237,7 +245,7 @@ for concatenation into an output YOLOLISP file."
                       (lambda (entry)
                         (let ((type (car entry))
                               (vars (cdr entry)))
-                          (mapcar (-partial #'cons type) vars)))
+                          (mapcar (apply-partially #'cons type) vars)))
                       type-decls)))
     (car (rassoc sym var-lookup))))
 
@@ -256,9 +264,9 @@ for concatenation into an output YOLOLISP file."
   (let ((sym (car form)))
     (cl-case sym
       (do        `(do ,@(yl-type-tagger-optimize-do (cdr form))))
-      (assign    (-replace-at 2 (yl-try-type-tag (caddr form)) form))
-      (op-assign (-replace-at 3 (yl-try-type-tag (cadddr form)) form))
-      (goto      (-replace-at 1 (yl-try-type-tag (cadr form)) form))
+      (assign    `(assign ,(cadr form) ,(yl-try-type-tag (caddr form))))
+      (op-assign `(op-assign ,(cadr form) ,(caddr form) ,(yl-try-type-tag (cadddr form))))
+      (goto      `(goto ,(yl-try-type-tag (cadr form))))
       (if        `(if ,(yl-try-type-tag (cadr form))
                       ,(yl-type-tagger-optimize (caddr form))
                     ;; conditionally splice in the fbranch if it exists
@@ -315,9 +323,9 @@ for concatenation into an output YOLOLISP file."
   (let ((sym (car form)))
     (cl-case sym
       (do        `(do ,@(mapcar #'yl-tag-stripper-optimize (cdr form))))
-      (assign    (-replace-at 2 (yl-ignore-expr-type-tag (caddr form)) form))
-      (op-assign (-replace-at 3 (yl-ignore-expr-type-tag (cadddr form)) form))
-      (goto      (-replace-at 1 (yl-ignore-expr-type-tag (cadr form)) form))
+      (assign    `(assign ,(cadr form) ,(yl-ignore-expr-type-tag (caddr form))))
+      (op-assign `(op-assign ,(cadr form) ,(caddr form) ,(yl-ignore-expr-type-tag (cadddr form))))
+      (goto      `(goto ,(yl-ignore-expr-type-tag (cadr form))))
       (if        `(if ,(yl-ignore-expr-type-tag (cadr form))
                       ,(yl-tag-stripper-optimize (caddr form))
                     ;; conditionally splice in the fbranch if it exists
@@ -338,26 +346,25 @@ for concatenation into an output YOLOLISP file."
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defun yl-fn (forms)
-  (-> forms
-      ;; Optimization
-      (yl-type-tagger-optimize)
-      (yl-optimize-shortcuts)
+  (thread-first forms
+    ;; Optimization
+    (yl-type-tagger-optimize)
+    (yl-optimize-shortcuts)
 
-      ;; Optimization cleanup
-      (yl-tag-stripper-optimize)
-      (yl-declare-stripper-optimize)
+    ;; Optimization cleanup
+    (yl-tag-stripper-optimize)
+    (yl-declare-stripper-optimize)
 
-      ;; Compilation
-      (yl-compile-form)
-      ;; Output formatting
-      (chunk-rearranger)))
+    ;; Compilation
+    (yl-compile-form)
+    ;; Output formatting
+    (chunk-rearranger)))
 
 (defmacro yl (&rest forms)
-  `(prog1 nil
-     (->> (yl-fn '(do ,@forms))
-          (mapcar (-partial #'s-join " "))
-          (s-join "\n")
-          princ)))
+  (let ((result (gensym 'result)))
+    `(let ((,result (yl-fn '(do ,@forms))))
+       (princ
+        (string-join (mapcar #'yl-join-chunks ,result) "\n")))))
 
 (defmacro yl* (&rest forms)
   `(yl-fn '(do ,@forms)))
