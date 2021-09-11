@@ -48,10 +48,12 @@ Usage: currently only invokable within Emacs. Use the `yl` macro like so:
    * Constrain code to 70-length column **[DONE]**
    * Warn when script longer than 20 lines
    * Remove/strip unneccessary whitespace
-     * In assigments **[DONE]**
+     * In assignments **[DONE]**
      * After function calls
      * Within `if` conditionals
    * Output operator precedence - YOLOLISP over-parenthesizes output expressions
+     * Basic precedence for arithmetic operations **[DONE]**
+     * Advanced precedence of all YOLOL operators (requires cleanup)
 
  * DECLARE form: specify YOLOL chip, types, optimizations, etc.
    * Declaration environment setup **[DONE]**

@@ -13,6 +13,19 @@
       " "
     ""))
 
+(defvar yl-expr-op-hierarchy
+  (thread-last '(== != ^ / * + -)
+    (seq-map-indexed #'cons)))
+
+(defun yl-get-precedence (op)
+  (cdr (assoc op yl-expr-op-hierarchy)))
+
+(defun yl-try-parenthesize (last-precedence op expr)
+  (let ((op-precedence (yl-get-precedence op)))
+    (if (< last-precedence op-precedence)
+        (concat "(" expr ")")
+      expr)))
+
 (defvar yl-unary-left
   '((neg . "-")
     (sqrt . "sqrt ")
@@ -36,9 +49,11 @@
     (fact . "!"))
   "one-arg operators on right-side of value")
 
-(cl-defun yl-compile-expr (expr &optional (level 0))
+(cl-defun yl-compile-expr (expr &optional (last-precedence 99))
   "Compiles a YOLOLISP expression `EXPR'.
-Optional `LEVEL' refers to nesting level, determining parenthesis use in nested expressions."
+LAST-PRECEDENCE is the precedence of the parent operation (lower
+value implies higher precedence), if this is a lower precedence
+operation then parentheses won't be added."
   (cl-etypecase expr
     (cons (let ((result (let* ((op (car expr))
                                (arg1 (cadr expr))
@@ -48,22 +63,22 @@ Optional `LEVEL' refers to nesting level, determining parenthesis use in nested 
                           (cond
                            ;; one argument operation, value on left
                            (left-one-arg-op
-                            (concat left-one-arg-op (yl-compile-expr arg1 (1+ level))))
+                            (concat left-one-arg-op (yl-compile-expr arg1)))
                            ;; one argument operation, value on right
                            (right-one-arg-op
-                            (concat (yl-compile-expr arg1 (1+ level)) right-one-arg-op))
+                            (concat (yl-compile-expr arg1) right-one-arg-op))
                            ;; two-arg binary operation
                            (t
-                            (concat (yl-compile-expr arg1 (1+ level))
-                                    (yl-separator)
-                                    (symbol-name op)
-                                    (yl-separator)
-                                    (yl-compile-expr arg2 (1+ level)))))
+                            (let ((op-precedence (yl-get-precedence op)))
+                              (yl-try-parenthesize
+                               last-precedence op
+                               (concat (yl-compile-expr arg1 op-precedence)
+                                       (yl-separator)
+                                       (symbol-name op)
+                                       (yl-separator)
+                                       (yl-compile-expr arg2 op-precedence))))))
                           )))
-            (if (> level 0)
-                ;; only apply parentheses to subexpressions of the subexpressions of the first binary op
-                (concat "(" result ")")
-              result)))
+            result))
     (symbol  (symbol-name expr))
     (string  (replace-regexp-in-string "\n" "\\\\n" (concat "\"" expr "\"")))
     (integer (number-to-string expr))
@@ -392,14 +407,14 @@ for concatenation into an output YOLOLISP file."
 
 ;; expr compiler tests
 (progn
-  (yl--test (yl-compile-expr '(== a (+ (+ 10 10) (+ 12 11)))) "a==((10+10)+(12+11))")
+  (yl--test (yl-compile-expr '(== a (+ (+ 10 10) (+ 12 11)))) "a==(10+10+12+11)")
   (yl--test (yl-compile-expr '(== :a :b)) ":a==:b")
   t)
 
 ;; primitive statement compiler tests
 (progn
   (yl--test (yl* (assign a 1) (assign b 2)) '(("a=1" "b=2")) )
-  (yl--test (yl* (if (= a 10) (assign b 4))) '(("if a=10 then b=4 end")))
+  (yl--test (yl* (if (== a 10) (assign b 4))) '(("if a==10 then b=4 end")))
   (yl--test (yl* (assign :a 10) (// "Comment!")) '((":a=10" "//Comment!")))
   (yl--test (yl* (op-assign z * 2)) '(("z*=2")))
   t)
@@ -408,7 +423,7 @@ for concatenation into an output YOLOLISP file."
 (progn
   (yl--test (yl* (set a 1 b 2)) '(("a=1" "b=2")))
   (yl--test (yl* (set z (* z 2))) '(("z*=2")))
-  (yl--test (yl* (set :y (+ :y (* z 2)))) '((":y+=z*2")) )
+  (yl--test (yl* (set :y (+ :y (* z 2)))) '((":y+=z*2")))
   t)
 
 ;; rearrangement tests
@@ -418,11 +433,11 @@ for concatenation into an output YOLOLISP file."
              ("// <-------------- this line is 70 characters long ------------------>")))
   (yl--test (yl* (set A 1000 pr 0 div (* (+ 9.6 (* 2.4 pr)) n) so (- 1 sp)
                       o 160000000 e (* 8 o) f 644444444 z (* 12 (* 25 A)) lol 1))
-            '(("A=1000" "pr=0" "div=(9.6+(2.4*pr))*n" "so=1-sp" "o=160000000" "e=8*o" "f=644444444")
-              ("z=12*(25*A)" "lol=1")))
+            '(("A=1000" "pr=0" "div=(9.6+2.4*pr)*n" "so=1-sp" "o=160000000" "e=8*o" "f=644444444")
+              ("z=12*25*A" "lol=1")))
   (yl--test (yl* (set A 1000 pr 0 div (* (+ 9.6 (* 2.4 pr)) n) so (- 1 sp)
                       o 160000000 e (* 8 o) f 6444444444))
-            '(("A=1000" "pr=0" "div=(9.6+(2.4*pr))*n" "so=1-sp" "o=160000000" "e=8*o") ("f=6444444444")))
+            '(("A=1000" "pr=0" "div=(9.6+2.4*pr)*n" "so=1-sp" "o=160000000" "e=8*o" "f=6444444444")))
   t)
 
 ;; optimizer tests
@@ -433,14 +448,13 @@ for concatenation into an output YOLOLISP file."
   (yl--test (yl-type-tagger-optimize '(if 1 (assign b 2) (assign a 3)))
             '(if (integer 1) (assign b (integer 2)) (assign a (integer 3))))
 
-  (yl--test (yl* (if 1 (assign r 2) (assign r 3))) '(("r=(3*(0^1))+(2*1)")) )
-  (yl--test (yl* (if 0 (assign r 2) (assign r 3))) '(("r=(3*(0^0))+(2*0)")) )
-
+  (yl--test (yl* (if 1 (assign r 2) (assign r 3))) '(("r=3*0^1+2*1")))
+  (yl--test (yl* (if 0 (assign r 2) (assign r 3))) '(("r=3*0^0+2*0")))
   t)
 
 ;; keep whitespace tests
 (progn
   (let ((*yl-whitespaced-expressions* t))
-    (yl--test (yl* (if 1 (assign r 2) (assign r 3))) '(("r = (3 * (0 ^ 1)) + (2 * 1)")))
-    (yl--test (yl* (if 0 (assign r 2) (assign r 3))) '(("r = (3 * (0 ^ 0)) + (2 * 0)"))))
+    (yl--test (yl* (if 1 (assign r 2) (assign r 3))) '(("r = 3 * 0 ^ 1 + 2 * 1")))
+    (yl--test (yl* (if 0 (assign r 2) (assign r 3))) '(("r = 3 * 0 ^ 0 + 2 * 0"))))
   t)
