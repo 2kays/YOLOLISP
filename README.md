@@ -10,20 +10,32 @@ Written in Emacs Lisp (...I was too lazy to set up a Common Lisp environment)
 
 YOLOLISP:
 
-```
-(set a 10)
-(set :b (inc a))
+```lisp
+;; Declarations are optional, but useful for hinting the optimizer.
+;; In this case, the if-statement later can be made branchless.
+(declare (type integer :c e))
+
+(set a  10
+     :b (inc a))
+
 (when (== :b 11)
   (set :c 1))
+
+(if :c
+    (assign d 1)
+  (assign d 2))
+
+(set e (* d (+ :c :b)))
+(set f (* a (* a (+ a a))))
+
+;; Lisp comment vs. output YOLOL comment
 (// "Made in YOLOLISP!")
 ```
 
 Compiles to YOLOL:
 ```
-a = 10
-:b = ++a
-if :b == 11 then :c = 1 end
-// Made in YOLOLISP!
+a=10 :b=a++ if :b==11 then :c=1 end d=2*0^:c+1*:c e=d*(:c+:b)
+f=a*a*(a+a) //Made in YOLOLISP!
 ```
 
 ###
