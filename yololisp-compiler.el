@@ -1,28 +1,40 @@
-;; Some sort of YOLOL Lisp-compiler...
+;;; yololisp-compiler.el --- YOLOLISP compiler  -*- lexical-binding: t; -*-
+;;;
+;;; Commentary:
+;;; Some sort of YOLOL Lisp-compiler...
+;;;
+;;; Code:
 
 (eval-when-compile
   (require 'cl-lib)
   (require 'seq)
   (require 'subr-x))
 
-(defvar *yl-whitespaced-expressions* nil
-  "Direct the compiler to surround expressions with whitespace.")
+(defvar *yl-separator* ""
+  "Output YOLOL's operator/operand output separator.
+Set this to \" \" for more readable YOLOL output.")
 
-(defun yl-separator (&optional readablep)
-  (if (or *yl-whitespaced-expressions* readablep)
-      " "
-    ""))
+(defun yl-join-exprs (&rest exprs)
+  "Join expressions `EXPRS' with *YL-SEPARATOR*."
+  (string-join exprs *yl-separator*))
 
-(defvar yl-expr-op-hierarchy
-  (thread-last '(== != ^ / * + -)
-    (seq-map-indexed #'cons)))
+(defvar yl-op-precedences
+  (eval-when-compile
+    (thread-last '(== != ^ / * + -)
+      (nreverse)
+      (seq-map-indexed #'cons)))
+  "Alist mapping operators to operator-precedences.")
 
 (defun yl-get-precedence (op)
-  (cdr (assoc op yl-expr-op-hierarchy)))
+  "Look up precedence for operator `OP'."
+  (cdr (assoc op yl-op-precedences)))
 
 (defun yl-try-parenthesize (last-precedence op expr)
+  "Attempt to parenthesize expression `EXPR'.
+This only occurs iff `OP's precedence is lower than
+`LAST-PRECEDENCE'."
   (let ((op-precedence (yl-get-precedence op)))
-    (if (< last-precedence op-precedence)
+    (if (< op-precedence last-precedence)
         (concat "(" expr ")")
       expr)))
 
@@ -41,19 +53,20 @@
     (asin . "asin ")
     (acos . "acos ")
     (atan . "atan "))
-  "one-arg operators on left-side of value")
+  "Unary operators on left-side of value.")
 
 (defvar yl-unary-right
   '((inc . "++")
     (dec . "--")
     (fact . "!"))
-  "one-arg operators on right-side of value")
+  "Unary operators on right-side of value.")
 
-(cl-defun yl-compile-expr (expr &optional (last-precedence 99))
+(cl-defun yl-compile-expr (expr &optional (last-precedence 0))
   "Compiles a YOLOLISP expression `EXPR'.
-LAST-PRECEDENCE is the precedence of the parent operation (lower
-value implies higher precedence), if this is a lower precedence
-operation then parentheses won't be added."
+`LAST-PRECEDENCE' is the precedence of the parent operation; if
+this is a higher precedence operation then parentheses won't be
+added.  0 is the seed precedence since top level exprs dont't
+need parens."
   (cl-etypecase expr
     (cons (let ((result (let* ((op (car expr))
                                (arg1 (cadr expr))
@@ -72,11 +85,9 @@ operation then parentheses won't be added."
                             (let ((op-precedence (yl-get-precedence op)))
                               (yl-try-parenthesize
                                last-precedence op
-                               (concat (yl-compile-expr arg1 op-precedence)
-                                       (yl-separator)
-                                       (symbol-name op)
-                                       (yl-separator)
-                                       (yl-compile-expr arg2 op-precedence))))))
+                               (yl-join-exprs (yl-compile-expr arg1 op-precedence)
+                                              (symbol-name op)
+                                              (yl-compile-expr arg2 op-precedence))))))
                           )))
             result))
     (symbol  (symbol-name expr))
@@ -88,11 +99,11 @@ operation then parentheses won't be added."
 ;; YOLOL PRIMITIVE COMPILER
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; Some nomenclature: a "chunk" of YOLOL is a string of output YOLOL like "a =
-;; 10" or "if a = 1 then b = 1 end". The compiler outputs lists of these YOLOL
-;; chunks, which can then be rearranged to meet chip code size limits.
+;; Some nomenclature: a "fragment" of YOLOL is a string of output YOLOL like "a
+;; = 10" or "if a = 1 then b = 1 end". The compiler outputs lists of these YOLOL
+;; fragments, which can then be rearranged to meet chip code size limits.
 
-(defun yl-join-chunks (forms &optional separator)
+(defun yl-join-fragments (forms &optional separator)
   "Joins the compilation result (`FORMS') of YOLOLISP's DO form.
 
 Accepts an optional `SEPARATOR' string."
@@ -100,49 +111,52 @@ Accepts an optional `SEPARATOR' string."
   (string-join (flatten-tree forms) (or separator " ")))
 
 (defun yl-compile-if (condition tbranch &optional fbranch)
-  ""
-  ;; Branches are compiled with YL-COMPILE-FORM, and the resulting chunks are
-  ;; joined with YL-JOIN-CHUNKS. We join because YOLOL's IF constrains the
-  ;; branch code to a single line, so we have to treat IF as a single "chunk",
-  ;; even though the branch code consists of viable chunks.
-  ;; (...in future we ought to retain the chunks for analysis reasons)
+  "Compile IF with condition `CONDITION' and truth-branch `TBRANCH'.
+Optionally supply a false-branch `FBRANCH'."
+  ;; Branches are compiled with YL-COMPILE-FORM, and the resulting fragments are
+  ;; joined with YL-JOIN-FRAGMENTS. We join because YOLOL's IF constrains the
+  ;; branch code to a single line, so we have to treat IF as a single
+  ;; "fragment", even though the branch code consists of viable fragments.
+  ;; (...in future we ought to retain the fragments for analysis reasons)
   (if fbranch
       (concat "if "
               (yl-compile-expr condition)
               " then "
-              (yl-join-chunks (yl-compile-form tbranch))
+              (yl-join-fragments (yl-compile-form tbranch))
               " else "
-              (yl-join-chunks (yl-compile-form fbranch))
+              (yl-join-fragments (yl-compile-form fbranch))
               " end")
     (concat "if "
             (yl-compile-expr condition)
             " then "
-            (yl-join-chunks (yl-compile-form tbranch))
+            (yl-join-fragments (yl-compile-form tbranch))
             " end")))
 
 (defun yl-compile-assign (var expr)
-  (concat (symbol-name var)
-          (yl-separator)
-          "="
-          (yl-separator)
-          (yl-compile-expr expr)))
+  "Compile ASSIGN of `EXPR' to `VAR'."
+  (yl-join-exprs (symbol-name var)
+                 "="
+                 (yl-compile-expr expr)))
 
 (defun yl-compile-op-assign (var op expr)
+  "Compile OP-ASSIGN, with `OP', of `EXPR' to `VAR'."
   (cl-ecase op
     ((+ - * /)
-     (concat (symbol-name var)
-             (yl-separator)
-             (format "%s=" op)
-             (yl-separator)
-             (yl-compile-expr expr)))))
+     (yl-join-exprs (symbol-name var)
+                    (format "%s=" op)
+                    (yl-compile-expr expr)))))
 
 (defun yl-compile-goto (expr)
+  "Compile GOTO `EXPR'."
   (concat "goto " (yl-compile-expr expr)))
 
 (defun yl-compile-do (forms)
+  "Compile DO form consisting of `FORMS'."
   (mapcar #'yl-compile-form forms))
 
-(defun yl-compile-form (form &optional env)
+(defun yl-compile-form (form)
+  "Compile a YOLOLISP form `FORM' into YOLOL fragments.
+Returns a list of lists of fragments."
   (let ((sym (car form)))
     (if (yl-get-macro sym)
         (yl-compile-form (yl-macroexpand form))
@@ -157,6 +171,10 @@ Accepts an optional `SEPARATOR' string."
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; YOLOLISP-MACROS
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; TODO: ...could we define these in YOLOLISP?
+;;       ...should we?
+;;       ...it's very un-Lispy to _not_ allow user-defined macros!
 
 (defun yl-macro-when (form)
   `(if ,(cadr form) ,(caddr form)))
@@ -199,40 +217,40 @@ Accepts an optional `SEPARATOR' string."
   (funcall (cdr (yl-get-macro (car form))) form))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; CODE SIZE CONSTRAINER / CHUNK REARRANGER
+;; CODE SIZE CONSTRAINER / FRAGMENT REARRANGER
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defun chunk-rearranger (chunks &optional column-width)
-  "Rearranges compiler output `CHUNKS' into `COLUMN-WIDTH' columns (default 70).
-Returns a list of lists of chunks constrained to columns, ready
-for concatenation into an output YOLOLISP file."
+(defun fragment-rearranger (fragments &optional column-width)
+  "Rearranges compiler output `FRAGMENTS' into `COLUMN-WIDTH' columns (default 70).
+Returns a list of lists of fragments constrained to columns,
+ready for concatenation into an output YOLOLISP file."
   (cl-loop
-   ;; CONSTRAINED-CHUNK-LISTS is a list of chunk lists that are
+   ;; CONSTRAINED-FRAGMENT-LISTS is a list of fragment lists that are
    ;; column-constrained. Each entry corresponds to a line of output YOLOL.
-   with constrained-chunk-lists = (list nil)
+   with constrained-fragment-lists = (list nil)
 
-   ;; Loop over all of our chunks. Chunk nesting order is not important to us
-   ;; here, so we flatten away the hierarchy.
-   for current-chunk in (flatten-tree chunks)
+   ;; Loop over all of our fragments. Fragment nesting order is not important to
+   ;; us here, so we flatten away the hierarchy.
+   for current-fragment in (flatten-tree fragments)
 
-   for current-line-chunks = (car constrained-chunk-lists)
-   ;; sum current line's chunks and factor in spacing to get total line's length
-   ;; (the final chunk has no space appended, hence the 1-)
-   for total-line-length = (+ (seq-reduce #'+ (mapcar #'length current-line-chunks) 0)
-                              (1- (length current-line-chunks)))
+   for current-line-fragments = (car constrained-fragment-lists)
+   ;; sum current line's fragments and factor in spacing to get total line's
+   ;; length (the final fragment has no space appended, hence the 1-)
+   for total-line-length = (+ (seq-reduce #'+ (mapcar #'length current-line-fragments) 0)
+                              (1- (length current-line-fragments)))
 
    ;; when we exceed the current line's column limit, create a new line, and
    ;; repoint to it
-   when (>= (+ total-line-length (length current-chunk)) (or column-width 70))
+   when (>= (+ total-line-length (length current-fragment)) (or column-width 70))
    do
-     (push nil constrained-chunk-lists)
+     (push nil constrained-fragment-lists)
 
-   ;; and finally, add the chunk to the appropriate line
+   ;; and finally, add the fragment to the appropriate line
    do
-     (push current-chunk (car constrained-chunk-lists))
+     (push current-fragment (car constrained-fragment-lists))
 
    ;; correct the ordering of all of these pushes by reversing everything
-   finally return (nreverse (mapcar #'nreverse constrained-chunk-lists))))
+   finally return (nreverse (mapcar #'nreverse constrained-fragment-lists))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; MULTIPASS OPTIMIZER
@@ -332,11 +350,11 @@ for concatenation into an output YOLOLISP file."
            (yl-integer-p (caddr tbranch))
            (eq 'assign (car fbranch))
            (yl-integer-p (caddr tbranch)))
-      (let ((s (cadr (cadr  form)))
+      (let ((s (cadr condition))
             (a (cadr (caddr fbranch)))
             (b (cadr (caddr tbranch))))
         `(assign ,(cadr tbranch) (+ (* ,a (^ 0 ,s)) (* ,b ,s))))
-    form))
+    `(if ,condition ,tbranch ,fbranch)))
 
 (defun yl-optimize-shortcuts (form)
   (let ((sym (car form)))
@@ -388,13 +406,13 @@ for concatenation into an output YOLOLISP file."
     ;; Compilation
     (yl-compile-form)
     ;; Output formatting
-    (chunk-rearranger)))
+    (fragment-rearranger)))
 
 (defmacro yl (&rest forms)
   (let ((result (gensym 'result)))
     `(let ((,result (yl-fn '(do ,@forms))))
        (princ
-        (string-join (mapcar #'yl-join-chunks ,result) "\n")))))
+        (string-join (mapcar #'yl-join-fragments ,result) "\n")))))
 
 (defmacro yl* (&rest forms)
   `(yl-fn '(do ,@forms)))
@@ -455,7 +473,10 @@ for concatenation into an output YOLOLISP file."
 
 ;; keep whitespace tests
 (progn
-  (let ((*yl-whitespaced-expressions* t))
+  (let ((*yl-separator* " "))
     (yl--test (yl* (if 1 (assign r 2) (assign r 3))) '(("r = 3 * 0 ^ 1 + 2 * 1")))
     (yl--test (yl* (if 0 (assign r 2) (assign r 3))) '(("r = 3 * 0 ^ 0 + 2 * 0"))))
   t)
+
+(provide 'yololisp-compiler)
+;;; yololisp-compiler.el ends here
