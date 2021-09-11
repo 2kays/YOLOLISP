@@ -11,36 +11,45 @@ Written in Emacs Lisp (...I was too lazy to set up a Common Lisp environment)
 YOLOLISP:
 
 ```elisp
-;; Declarations are optional, but useful for hinting the optimizer.
-;; In this case, the if-statement later can be made branchless.
-(declare (type integer :c e))
+(yl
+ ;; Declarations are optional, but useful for hinting the optimizer.
+ ;; In this case, the if-statement later can be made branchless.
+ (declare (type integer :c e))
 
-(set a  10
-     :b (inc a))
+ ;; Assignment
+ (set a  10
+      :b (inc a))
 
-(when (== :b 11)
-  (set :c 1))
+ ;; Simple WHEN conditional
+ (when (== :b 11)
+   (set :c 1))
 
-(if :c
-    (assign d 1)
-  (assign d 2))
+ ;; IF conditional (optimised into a branchless form)
+ (if :c
+     (assign d 1)
+   (assign d 2))
 
-(set e (* d (+ :c :b)))
-(set f (* a (* a (+ a a))))
+ ;; Arithmetic expressions
+ (set e (* d (+ :c :b)))
+ (set f (* a (* a (+ a a))))
 
-;; Lisp comment vs. output YOLOL comment
-(// "Made in YOLOLISP!")
+ ;; Literal output for when YOLOLISP isn't enough
+ (literal "\nz = e + f")
+
+ ;; Lisp comment vs. output YOLOL comment
+ (// "Made in YOLOLISP!"))
 ```
 
 Compiles to YOLOL:
 ```
 a=10 :b=a++ if :b==11 then :c=1 end d=2*0^:c+1*:c e=d*(:c+:b)
-f=a*a*(a+a) //Made in YOLOLISP!
+f=a*a*(a+a)
+z = e + f //Made in YOLOLISP!
 ```
 
-###
+### Usage:
 
-Usage: currently only invokable within Emacs. Use the `yl` macro like so:
+Currently only invokable within Emacs. Use the `yl` macro like so:
 
 ```lisp
 (yl
@@ -91,6 +100,8 @@ Usage: currently only invokable within Emacs. Use the `yl` macro like so:
    * An Emacs YOLOLISP environment?
    * Error-triggering for code speedup -- error handling system?
    * Looping helper macros?
+   * Smarter type inferencing?!
+   * Generic output literal for greater control **[DONE]**
 
  * Documentation, cleanup, maintenance
    * Clean up the unary operator code...

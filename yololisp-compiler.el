@@ -139,9 +139,6 @@ Accepts an optional `SEPARATOR' string."
 (defun yl-compile-goto (expr)
   (concat "goto " (yl-compile-expr expr)))
 
-(defun yl-compile-comment (comment)
-  (concat "//" comment))
-
 (defun yl-compile-do (forms)
   (mapcar #'yl-compile-form forms))
 
@@ -155,7 +152,7 @@ Accepts an optional `SEPARATOR' string."
         (assign (list (yl-compile-assign  (cadr form) (caddr form))))
         (op-assign (list (yl-compile-op-assign (cadr form) (caddr form) (cadddr form))))
         (goto   (list (yl-compile-goto    (cadr form))))
-        (//     (list (yl-compile-comment (cadr form))))))))
+        (literal (list (cadr form)))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; YOLOLISP-MACROS
@@ -166,6 +163,9 @@ Accepts an optional `SEPARATOR' string."
 
 (defun yl-macro-unless (form)
   `(if (! ,(cadr form)) ,(caddr form)))
+
+(defun yl-macro-// (form)
+  `(literal ,(concat "//" (cadr form))))
 
 (defun yl-transform-assign-pair (pair)
   (let* ((var    (car pair))
@@ -189,6 +189,7 @@ Accepts an optional `SEPARATOR' string."
   '((when   . yl-macro-when)
     (unless . yl-macro-unless)
     (set    . yl-macro-set)
+    (//     . yl-macro-//)
     (//-line-length . yl-macro-comment-line-length)))
 
 (defun yl-get-macro (symbol)
