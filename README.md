@@ -10,7 +10,7 @@ Written in Emacs Lisp (...I was too lazy to set up a Common Lisp environment)
 
 YOLOLISP:
 
-```lisp
+```elisp
 ;; Declarations are optional, but useful for hinting the optimizer.
 ;; In this case, the if-statement later can be made branchless.
 (declare (type integer :c e))
