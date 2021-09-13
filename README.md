@@ -24,7 +24,7 @@ YOLOLISP:
  (when (== :b 11)
    (set :c 1))
 
- ;; IF conditional (optimised into a branchless form)
+ ;; IF conditional (optimisable into a branchless form)
  (if :c
      (assign d 1)
    (assign d 2))
@@ -94,6 +94,7 @@ Currently only invokable within Emacs. Use the `yl` macro like so:
    * Useful compilation error messages
 
  * Misc. features:
+   * Labels as goto targets
    * `set` macro should infer +=,-=,*=,/= **[DONE]**
    * More useful macros and utilities
    * Interface with some YOLOL emulators

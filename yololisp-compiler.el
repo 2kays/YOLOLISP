@@ -151,8 +151,13 @@ Optionally supply a false-branch `FBRANCH'."
   (concat "goto " (yl-compile-expr expr)))
 
 (defun yl-compile-do (forms)
-  "Compile DO form consisting of `FORMS'."
-  (mapcar #'yl-compile-form forms))
+  "Compile DO form consisting of `FORMS'.
+Drops any found DECLARE forms while keeping the declaration
+environment intact."
+  (with-decl-env (forms)
+    (if (eq 'declare (caar forms))
+        (mapcar #'yl-compile-form (cdr forms))
+      (mapcar #'yl-compile-form forms))))
 
 (defun yl-compile-form (form)
   "Compile a YOLOLISP form `FORM' into YOLOL fragments.
@@ -276,6 +281,7 @@ ready for concatenation into an output YOLOLISP file."
            *declarations*)))
 
 (cl-defmacro with-decl-env ((forms) &body body)
+  (declare (indent 1))
   `(let ((*declarations*
           (or (and (eq 'declare (caar forms))
                    (cons (cdar forms) *declarations*))
@@ -381,14 +387,6 @@ ready for concatenation into an output YOLOLISP file."
                         (list fbranch))))
       (otherwise form))))
 
-(defun yl-declare-stripper-optimize (form)
-  (let ((sym (car form)))
-    (cl-case sym
-      (do (if (eq (caadr form) 'declare)
-              `(do ,@(mapcar #'yl-declare-stripper-optimize (cddr form)))
-            `(do ,@(mapcar #'yl-declare-stripper-optimize (cdr form)))))
-      (otherwise form))))
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; CONVENIENCE MACROS
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -401,7 +399,6 @@ ready for concatenation into an output YOLOLISP file."
 
     ;; Optimization cleanup
     (yl-tag-stripper-optimize)
-    (yl-declare-stripper-optimize)
 
     ;; Compilation
     (yl-compile-form)
@@ -477,6 +474,10 @@ ready for concatenation into an output YOLOLISP file."
     (yl--test (yl* (if 1 (assign r 2) (assign r 3))) '(("r = 3 * 0 ^ 1 + 2 * 1")))
     (yl--test (yl* (if 0 (assign r 2) (assign r 3))) '(("r = 3 * 0 ^ 0 + 2 * 0"))))
   t)
+
+;; DECLARE tests
+(progn
+  (yl--test (yl* (do (declare (type integer a)) (set a b))) '(("a=b"))))
 
 (provide 'yololisp-compiler)
 ;;; yololisp-compiler.el ends here
