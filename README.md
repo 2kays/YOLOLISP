@@ -90,11 +90,12 @@ Currently only invokable within Emacs. Use the `yl` macro like so:
 
  * Compiler usability and accessibility
    * Replace ELPA/MELPA dependencies with built-in Emacs stuff **[DONE]**
-   * Create a compiler entrypoint shell script
+   * Create a compiler entrypoint shell script *[IN-PROGRESS]*
    * Useful compilation error messages
 
  * Misc. features:
-   * Labels as goto targets
+   * Labels as goto targets **[DONE]**
+     * Labels can be used as constants in exprs
    * `set` macro should infer +=,-=,*=,/= **[DONE]**
    * More useful macros and utilities
    * Interface with some YOLOL emulators
@@ -107,6 +108,8 @@ Currently only invokable within Emacs. Use the `yl` macro like so:
  * Documentation, cleanup, maintenance
    * Clean up the unary operator code...
    * Actually add documentation!
-   * Function docstrings
-   * ELISP code style compliance
+   * Function docstrings *[IN-PROGRESS]*
+   * ELISP code style compliance **[DONE]**
+     * Headers and footers and exports **[DONE]**
+     * Convert dash.el and s.el calls to inbuilt ones **[DONE]**
    * Split into multiple files
