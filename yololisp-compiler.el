@@ -159,19 +159,22 @@ environment intact."
         (mapcar #'yl-compile-form (cdr forms))
       (mapcar #'yl-compile-form forms))))
 
+(defun yl-compile-label ()
+  "Compile LABEL - we don't do this (yet?)."
+  "")
+
 (defun yl-compile-form (form)
   "Compile a YOLOLISP form `FORM' into YOLOL fragments.
 Returns a list of lists of fragments."
   (let ((sym (car form)))
-    (if (yl-get-macro sym)
-        (yl-compile-form (yl-macroexpand form))
-      (cl-ecase sym
-        (do     (yl-compile-do (cdr form)))
-        (if     (list (yl-compile-if (cadr form) (caddr form) (cadddr form))))
-        (assign (list (yl-compile-assign  (cadr form) (caddr form))))
-        (op-assign (list (yl-compile-op-assign (cadr form) (caddr form) (cadddr form))))
-        (goto   (list (yl-compile-goto    (cadr form))))
-        (literal (list (cadr form)))))))
+    (cl-ecase sym
+      (do     (yl-compile-do (cdr form)))
+      (if     (list (yl-compile-if (cadr form) (caddr form) (cadddr form))))
+      (assign (list (yl-compile-assign (cadr form) (caddr form))))
+      (op-assign (list (yl-compile-op-assign (cadr form) (caddr form) (cadddr form))))
+      (label  (list (yl-compile-label)))
+      (goto   (list (yl-compile-goto (cadr form))))
+      (literal (list (cadr form))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; YOLOLISP-MACROS
@@ -218,44 +221,121 @@ Returns a list of lists of fragments."
 (defun yl-get-macro (symbol)
   (assoc symbol yl-macro-registry))
 
-(defun yl-macroexpand (form)
+(defun yl-expand-macro (form)
   (funcall (cdr (yl-get-macro (car form))) form))
+
+(defun yl-macroexpand (form)
+  "Recursively and repeatedly expand all macros in `FORM'."
+  (if-let ((sym (and (consp form) (car form))))
+      (if (yl-get-macro sym)
+          (yl-macroexpand (yl-expand-macro form))
+        (cl-ecase sym
+          (do        `(do ,@(mapcar #'yl-macroexpand (cdr form))))
+          (assign    `(assign ,(cadr form) ,(yl-macroexpand (caddr form))))
+          (op-assign `(op-assign ,(cadr form) ,(caddr form) ,(yl-macroexpand (cadddr form))))
+          (goto      `(goto ,(yl-macroexpand (cadr form))))
+          (if        `(if ,(yl-macroexpand (cadr form))
+                          ,(yl-macroexpand (caddr form))
+                        ;; conditionally splice in the fbranch if it exists
+                        ,@(when-let ((fbranch (yl-macroexpand (cadddr form))))
+                            (list fbranch))))
+          (otherwise form)))
+    form))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; DO-COLLAPSER
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defun collapse-do-forms (form)
+  "Collapse 'simple' nested DO forms in `FORM'.
+Doesn't attempt to collapse DOs with an associated DECLARE."
+  (mapcan (lambda (f)
+            (if (and (consp f)
+                     (eq 'do (car f)))
+                ;; NOTE: we don't collapse DOs with DECLAREs into parents.
+                ;;       DECLARE adds additional lexical information that
+                ;;       would be otherwise be lost.
+                (if (and (consp (cadr f))
+                         (eq 'declare (caadr f)))
+                    (list (collapse-do-forms f))
+                  (collapse-do-forms (cdr f)))
+              (list f)))
+          form))
+
+(defun yl-do-collapser (form)
+  "Collapse simple DO blocks within `FORM'."
+  (if-let ((sym (and (consp form) (car form))))
+      (cl-ecase sym
+        (do `(do ,@(collapse-do-forms (cdr form))))
+        (otherwise form))
+    form))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; CODE SIZE CONSTRAINER / FRAGMENT REARRANGER
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defun fragment-rearranger (fragments &optional column-width)
-  "Rearranges compiler output `FRAGMENTS' into `COLUMN-WIDTH' columns (default 70).
-Returns a list of lists of fragments constrained to columns,
-ready for concatenation into an output YOLOLISP file."
-  (cl-loop
-   ;; CONSTRAINED-FRAGMENT-LISTS is a list of fragment lists that are
-   ;; column-constrained. Each entry corresponds to a line of output YOLOL.
-   with constrained-fragment-lists = (list nil)
+(defun sum-list (list)
+  "Sums all numbers in `LIST'."
+  (seq-reduce #'+ list 0))
 
-   ;; Loop over all of our fragments. Fragment nesting order is not important to
-   ;; us here, so we flatten away the hierarchy.
-   for current-fragment in (flatten-tree fragments)
+(defun toplevel-do-rearranger (form &optional column-width)
+  "Rearrange a top level DO form `FORM' to a YOLOL-esque sexp format.
+The format is line-and-column-conscious and very closely
+resembles the eventual YOLOL output, rearranging forms across
+lines based on their expected compiled YOLOL output.
 
-   for current-line-fragments = (car constrained-fragment-lists)
-   ;; sum current line's fragments and factor in spacing to get total line's
-   ;; length (the final fragment has no space appended, hence the 1-)
-   for total-line-length = (+ (seq-reduce #'+ (mapcar #'length current-line-fragments) 0)
-                              (1- (length current-line-fragments)))
+`COLUMN-WIDTH' (default: 70)"
+  ;;
+  ;; The main motivation for this YOLOL-analogue format is LABEL and GOTO
+  ;; referencing: LABEL is sensitive to eventual output position, and meanwhile
+  ;; GOTOs need to be able to translate a label into a line number.
+  ;;
+  ;; Code adapted from the original string fragment rearranger.
+  ;;
+  ;; TODO: RENAME/REFACTOR/REDESCRIBE THIS GARBAGE.
+  ;;
+  ;; TODO: This function repeatedly calls YL-COMPILE-FORM to figure out the
+  ;; lengths of the output YOLOL fragments. We should memoize this call.
+  ;;
+  (when (eq 'do (car form))
+    (cl-loop
+     with forms = (cdr form)
+     ;; CONSTRAINED-FORM-LISTS is a list of lists of forms that are
+     ;; column-constrained. Each entry in this list corresponds to a line of
+     ;; output YOLOL.
+     with constrained-form-lists = (list nil)
 
-   ;; when we exceed the current line's column limit, create a new line, and
-   ;; repoint to it
-   when (>= (+ total-line-length (length current-fragment)) (or column-width 70))
-   do
-     (push nil constrained-fragment-lists)
+     ;; Loop over all of our forms.
+     for current-form in forms
 
-   ;; and finally, add the fragment to the appropriate line
-   do
-     (push current-fragment (car constrained-fragment-lists))
+     ;; The current output line's forms
+     for current-line-forms = (car constrained-form-lists)
 
-   ;; correct the ordering of all of these pushes by reversing everything
-   finally return (nreverse (mapcar #'nreverse constrained-fragment-lists))))
+     ;; sum current line's form's compiler output length, and factor in spacing
+     ;; to get total line's length (the final fragment has no space appended,
+     ;; hence the 1-)
+     ;; TODO: fix ugly
+     for total-line-length = (+ (sum-list
+                                 (mapcar (lambda (f)
+                                           (sum-list
+                                            (mapcar #'length
+                                                    (flatten-tree (yl-compile-form f)))))
+                                         current-line-forms))
+                                (1- (length current-line-forms)))
+     for current-form-length = (sum-list (mapcar #'length (flatten-tree (yl-compile-form current-form))))
+
+     ;; when we exceed the current line's column limit, create a new line, and
+     ;; repoint to it
+     when (>= (+ total-line-length current-form-length) (or column-width 70))
+     do
+     (push nil constrained-form-lists)
+
+     ;; and finally, add the form to the appropriate line
+     do
+     (push current-form (car constrained-form-lists))
+
+     ;; correct the ordering of all of these pushes by reversing everything
+     finally return (nreverse (mapcar #'nreverse constrained-form-lists)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; MULTIPASS OPTIMIZER
@@ -388,6 +468,16 @@ ready for concatenation into an output YOLOLISP file."
       (otherwise form))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; REARRANGED FORM COMPILER
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defun yl-compile-rearranged (forms)
+  (mapcar (lambda (forms)
+            (flatten-tree
+             (yl-compile-do forms)))
+          forms))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; CONVENIENCE MACROS
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -400,10 +490,17 @@ ready for concatenation into an output YOLOLISP file."
     ;; Optimization cleanup
     (yl-tag-stripper-optimize)
 
-    ;; Compilation
-    (yl-compile-form)
-    ;; Output formatting
-    (fragment-rearranger)))
+    ;; Expand macros
+    (yl-macroexpand)
+
+    ;; Collapse unnecessary nested DOs
+    (yl-do-collapser)
+
+    ;; Rearrange toplevel forms to fit the chip
+    (toplevel-do-rearranger)
+
+    ;; Compile these rearranged forms
+    (yl-compile-rearranged)))
 
 (defmacro yl (&rest forms)
   (let ((result (gensym 'result)))
@@ -475,9 +572,41 @@ ready for concatenation into an output YOLOLISP file."
     (yl--test (yl* (if 0 (assign r 2) (assign r 3))) '(("r = 3 * 0 ^ 0 + 2 * 0"))))
   t)
 
-;; DECLARE tests
+;; DECLARE and DO tests
 (progn
-  (yl--test (yl* (do (declare (type integer a)) (set a b))) '(("a=b"))))
+  (yl--test (yl* (do (declare (type integer a)) (set a b))) '(("a=b")))
+
+  ;; DO collapser tests
+  (yl--test (yl-do-collapser
+             '(do
+               (do
+                (declare)
+                (do
+                 (set g h)
+                 (do
+                  (declare)
+                  (set i j))))))
+            '(do
+              (do
+               (declare)
+               (set g h)
+               (do
+                (declare)
+                (set i j)))))
+
+  (yl--test (yl-do-collapser
+             '(do
+               (do
+                (do
+                 (declare)
+                 (set g h)
+                 (do
+                  (set i j))))))
+            '(do
+              (do
+               (declare)
+               (set g h)
+               (set i j)))))
 
 (provide 'yololisp-compiler)
 ;;; yololisp-compiler.el ends here
