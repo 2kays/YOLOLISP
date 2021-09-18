@@ -324,9 +324,12 @@ lines based on their expected compiled YOLOL output.
                                 (1- (length current-line-forms)))
      for current-form-length = (sum-list (mapcar #'length (flatten-tree (yl-compile-form current-form))))
 
-     ;; when we exceed the current line's column limit, create a new line, and
-     ;; repoint to it
-     when (>= (+ total-line-length current-form-length) (or column-width 70))
+     ;; when we
+     ;; (1) encounter a LABEL
+     ;; (2) exceed the current line's column limit
+     ;; then create a new line, and repoint to it
+     when (or (eq 'label (car current-form))
+              (>= (+ total-line-length current-form-length) (or column-width 70)))
      do
      (push nil constrained-form-lists)
 
@@ -472,10 +475,50 @@ lines based on their expected compiled YOLOL output.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defun yl-compile-rearranged (forms)
+  ""
   (mapcar (lambda (forms)
             (flatten-tree
              (yl-compile-do forms)))
           forms))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; LABEL AND GOTO "HANDLER"
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; TODO: clean up this crap
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defun label-thinger (lines)
+  ""
+  (seq-map-indexed
+   (lambda (line n)
+     (cons (1+ n)
+           ;; grab first label for line, one label per line PEOPLE! :)
+           (cadar
+            (seq-filter (lambda (form)
+                          (and (consp form)
+                               (eq 'label (car form))))
+                        line))))
+
+   lines))
+
+(defun yl-goto-label-resolver (lines)
+  ""
+  (let ((line-label-rlookup (label-thinger lines)))
+    (cl-labels ((fixify-gotos (form)
+                              (cl-case (car form)
+                                (label nil)
+                                (goto (list (let* ((goto-expr (cadr form))
+                                                   (label-line (rassoc goto-expr line-label-rlookup)))
+                                              (if (eq goto-expr (cdr label-line))
+                                                  `(goto ,(car label-line))
+                                                form))))
+                                (do (list `(do ,@(mapcan #'fixify-gotos (cdr form)))))
+                                (t (list form)))))
+      (mapcar #'(lambda (line)
+                  (mapcan #'fixify-gotos line))
+              lines))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; CONVENIENCE MACROS
@@ -498,6 +541,13 @@ lines based on their expected compiled YOLOL output.
 
     ;; Rearrange toplevel forms to fit the chip
     (toplevel-do-rearranger)
+
+    ;; Resolve LABELs to lines, and GOTOs to LABELs. This strips LABELs.
+    ;;
+    ;; We (should) do an extra rearrangement step as the label resolver can turn
+    ;; "goto somelabel" into "goto 3", which is significantly shorter!
+    (yl-goto-label-resolver)
+    ;; (toplevel-do-rearranger)
 
     ;; Compile these rearranged forms
     (yl-compile-rearranged)))
@@ -606,7 +656,27 @@ lines based on their expected compiled YOLOL output.
               (do
                (declare)
                (set g h)
-               (set i j)))))
+               (set i j))))
+
+  ;; goto-label and label stripping
+  (yl--test (yl-goto-label-resolver
+             '(((label e) (do (set q p)))
+               ((set a 0 b 100))
+               ((label x) (set a (+ a 1)) (goto y))
+               ((label y) (label z) (set b (+ b 1)) (goto x))))
+            '(((do (set q p)))
+              ((set a 0 b 100))
+              ((set a (+ a 1)) (goto 4))
+              ((set b (+ b 1)) (goto 3))))
+
+  ;; goto resolution full test
+  (yl--test (yl* (set :out 0)
+                 (label lbl)
+                 (set :out (+ :out 1))
+                 (goto lbl)
+                 (goto xd))
+            '((":out=0") (":out+=1" "goto 2" "goto xd")))
+  t)
 
 (provide 'yololisp-compiler)
 ;;; yololisp-compiler.el ends here
