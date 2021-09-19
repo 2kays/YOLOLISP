@@ -102,6 +102,8 @@ Currently only invokable within Emacs. Use the `yl` macro like so:
    * An Emacs YOLOLISP environment?
    * Error-triggering for code speedup -- error handling system?
    * Looping helper macros?
+     * WHILE loop **[DONE]**
+     * FOR loop **[DONE]**
    * Smarter type inferencing?!
    * Generic output literal for greater control **[DONE]**
 

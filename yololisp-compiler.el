@@ -242,12 +242,58 @@ Returns a list of lists of fragments."
 (defun yl-macro-comment-line-length (form)
   `(// " <-------------- this line is 70 characters long ------------------>"))
 
+;; cheap trashy YOLOLISP gensym
+(defvar *ylgensym-counter* 0)
+(defun yl-gensym ()
+  ""
+  (intern (concat "YL" (number-to-string
+                        (cl-incf *ylgensym-counter*)))))
+
+(defun yl-macro-while (form)
+  (let ((lbl-start  (yl-gensym))
+        (lbl-finish (yl-gensym))
+        (condition  (cadr form))
+        (body       (cddr form)))
+    `(do
+      (label ,lbl-start)
+      (when (not ,condition)
+        (goto ,lbl-finish))
+      ,@body
+      (goto ,lbl-start)
+      (label ,lbl-finish))))
+
+(defun yl-macro-for (form)
+  (let* ((lbl-start  (yl-gensym))
+         (lbl-finish (yl-gensym))
+
+         (spec       (cadr form))
+         (body       (cddr form))
+
+         (var-init   (car spec))
+         (condition  (cadr spec))
+         (step       (caddr spec)))
+    `(do
+      (set . ,var-init)
+      (label ,lbl-start)
+      (when (not ,condition)
+        (goto ,lbl-finish))
+      ,@body
+      ,step
+      (goto ,lbl-start)
+      (label ,lbl-finish))))
+
 (defvar yl-macro-registry
   '((when   . yl-macro-when)
     (unless . yl-macro-unless)
+
     (set    . yl-macro-set)
+
     (//     . yl-macro-//)
     (//-line-length . yl-macro-comment-line-length)
+
+    (while  . yl-macro-while)
+    (for    . yl-macro-for)
+
     (inc    . yl-macro-inc)
     (dec    . yl-macro-dec)
     (preinc . yl-macro-preinc)
@@ -269,6 +315,7 @@ Returns a list of lists of fragments."
           (assign    `(assign ,(cadr form) ,(yl-macroexpand (caddr form))))
           (op-assign `(op-assign ,(cadr form) ,(caddr form) ,(yl-macroexpand (cadddr form))))
           (goto      `(goto ,(yl-macroexpand (cadr form))))
+          (label     `(label ,(yl-macroexpand (cadr form))))
           (if        `(if ,(yl-macroexpand (cadr form))
                           ,(yl-macroexpand (caddr form))
                         ;; conditionally splice in the fbranch if it exists
@@ -360,10 +407,11 @@ lines based on their expected compiled YOLOL output.
      for current-form-length = (sum-list (mapcar #'length (flatten-tree (yl-compile-form current-form))))
 
      ;; when we
-     ;; (1) encounter a LABEL
+     ;; (1) encounter a LABEL (that isnt on the first line)
      ;; (2) exceed the current line's column limit
      ;; then create a new line, and repoint to it
-     when (or (eq 'label (car current-form))
+     when (or (and (eq 'label (car current-form))
+                   (not (equal constrained-form-lists (list nil))))
               (>= (+ total-line-length current-form-length) (or column-width 70)))
      do
      (push nil constrained-form-lists)
@@ -550,6 +598,9 @@ lines based on their expected compiled YOLOL output.
                                                   `(goto ,(car label-line))
                                                 form))))
                                 (do (list `(do ,@(mapcan #'fixify-gotos (cdr form)))))
+                                (if (list `(if ,(cadr form)
+                                               ,@(mapcan #'fixify-gotos (cddr form))
+                                             ,@(mapcan #'fixify-gotos (cdddr form)))))
                                 (t (list form)))))
       (mapcar #'(lambda (line)
                   (mapcan #'fixify-gotos line))
