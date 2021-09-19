@@ -20,7 +20,18 @@ Set this to \" \" for more readable YOLOL output.")
 
 (defvar yl-op-precedences
   (eval-when-compile
-    (thread-last '(== != ^ / * + -)
+    (thread-last '(inc dec
+                       preinc predec
+                       !
+                       sqrt abs sin cos tan
+                       neg
+                       ^
+                       / *
+                       < > == != <= >=
+                       + -
+                       not
+                       or
+                       and)
       (nreverse)
       (seq-map-indexed #'cons)))
   "Alist mapping operators to operator-precedences.")
@@ -138,9 +149,17 @@ Optionally supply a false-branch `FBRANCH'."
                  "="
                  (yl-compile-expr expr)))
 
-(defun yl-compile-op-assign (var op expr)
+(defun yl-compile-op-assign (var op &optional expr)
   "Compile OP-ASSIGN, with `OP', of `EXPR' to `VAR'."
   (cl-ecase op
+    ((inc dec)
+     (let ((op-string (cdr (assoc op yl-unary-right))))
+       (yl-join-exprs (symbol-name var)
+                      op-string)))
+    ((preinc predec)
+     (let ((op-string (cdr (assoc op yl-unary-left))))
+       (yl-join-exprs op-string
+                      (symbol-name var))))
     ((+ - * /)
      (yl-join-exprs (symbol-name var)
                     (format "%s=" op)
@@ -208,6 +227,18 @@ Returns a list of lists of fragments."
          (assign-pairs (mapcar #'yl-transform-assign-pair pairs)))
     `(do ,@assign-pairs)))
 
+(defun yl-macro-inc (form)
+  `(op-assign ,(cadr form) inc))
+
+(defun yl-macro-dec (form)
+  `(op-assign ,(cadr form) dec))
+
+(defun yl-macro-preinc (form)
+  `(op-assign ,(cadr form) preinc))
+
+(defun yl-macro-predec (form)
+  `(op-assign ,(cadr form) predec))
+
 (defun yl-macro-comment-line-length (form)
   `(// " <-------------- this line is 70 characters long ------------------>"))
 
@@ -216,7 +247,11 @@ Returns a list of lists of fragments."
     (unless . yl-macro-unless)
     (set    . yl-macro-set)
     (//     . yl-macro-//)
-    (//-line-length . yl-macro-comment-line-length)))
+    (//-line-length . yl-macro-comment-line-length)
+    (inc    . yl-macro-inc)
+    (dec    . yl-macro-dec)
+    (preinc . yl-macro-preinc)
+    (predec . yl-macro-predec)))
 
 (defun yl-get-macro (symbol)
   (assoc symbol yl-macro-registry))
