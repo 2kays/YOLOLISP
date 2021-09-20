@@ -116,6 +116,7 @@ Use the `yl` macro like so:
    * Labels as goto targets **[DONE]**
      * Labels can be used as constants in exprs
    * `set` macro should infer +=,-=,*=,/= **[DONE]**
+     * **ACTUALLY THIS IS DUMB.** This should be done as optimisation.
    * More useful macros and utilities
    * Interface with some YOLOL emulators
    * An Emacs YOLOLISP environment?
@@ -125,6 +126,7 @@ Use the `yl` macro like so:
      * FOR loop **[DONE]**
    * Smarter type inferencing?!
    * Generic output literal for greater control **[DONE]**
+   * Vector/Matrix helper macros (see advmath.el) **[IN-PROGRESS]**
 
  * Documentation, cleanup, maintenance
    * Clean up the unary operator code...
@@ -133,4 +135,4 @@ Use the `yl` macro like so:
    * ELISP code style compliance **[DONE]**
      * Headers and footers and exports **[DONE]**
      * Convert dash.el and s.el calls to inbuilt ones **[DONE]**
-   * Split into multiple files
+   * Split codebase into multiple files
