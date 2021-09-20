@@ -180,7 +180,11 @@ environment intact."
 
 (defun yl-compile-label ()
   "Compile LABEL - we don't do this (yet?)."
-  "")
+  nil)
+
+(defun yl-compile-declare ()
+  "Compile DECLARE - we don't do this (yet?)."
+  nil)
 
 (defun yl-compile-form (form)
   "Compile a YOLOLISP form `FORM' into YOLOL fragments.
@@ -192,8 +196,10 @@ Returns a list of lists of fragments."
       (assign (list (yl-compile-assign (cadr form) (caddr form))))
       (op-assign (list (yl-compile-op-assign (cadr form) (caddr form) (cadddr form))))
       (label  (list (yl-compile-label)))
+      (declare  (list (yl-compile-declare)))
       (goto   (list (yl-compile-goto (cadr form))))
-      (literal (list (cadr form))))))
+      (literal (list (cadr form)))
+      ((inc dec preinc predec) (yl-compile-expr form)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; YOLOLISP-MACROS
@@ -227,19 +233,7 @@ Returns a list of lists of fragments."
          (assign-pairs (mapcar #'yl-transform-assign-pair pairs)))
     `(do ,@assign-pairs)))
 
-(defun yl-macro-inc (form)
-  `(op-assign ,(cadr form) inc))
-
-(defun yl-macro-dec (form)
-  `(op-assign ,(cadr form) dec))
-
-(defun yl-macro-preinc (form)
-  `(op-assign ,(cadr form) preinc))
-
-(defun yl-macro-predec (form)
-  `(op-assign ,(cadr form) predec))
-
-(defun yl-macro-comment-line-length (form)
+(defun yl-macro-comment-line-length (_)
   `(// " <-------------- this line is 70 characters long ------------------>"))
 
 ;; cheap trashy YOLOLISP gensym
@@ -292,12 +286,7 @@ Returns a list of lists of fragments."
     (//-line-length . yl-macro-comment-line-length)
 
     (while  . yl-macro-while)
-    (for    . yl-macro-for)
-
-    (inc    . yl-macro-inc)
-    (dec    . yl-macro-dec)
-    (preinc . yl-macro-preinc)
-    (predec . yl-macro-predec)))
+    (for    . yl-macro-for)))
 
 (defun yl-get-macro (symbol)
   (assoc symbol yl-macro-registry))
@@ -397,14 +386,17 @@ lines based on their expected compiled YOLOL output.
      ;; to get total line's length (the final fragment has no space appended,
      ;; hence the 1-)
      ;; TODO: fix ugly
-     for total-line-length = (+ (sum-list
-                                 (mapcar (lambda (f)
-                                           (sum-list
-                                            (mapcar #'length
-                                                    (flatten-tree (yl-compile-form f)))))
-                                         current-line-forms))
-                                (1- (length current-line-forms)))
-     for current-form-length = (sum-list (mapcar #'length (flatten-tree (yl-compile-form current-form))))
+     for total-line-length
+     = (+ (sum-list
+           (mapcar (lambda (f)
+                     (sum-list
+                      (mapcar #'length
+                              (flatten-tree (yl-compile-form f)))))
+                   current-line-forms))
+          (1- (length current-line-forms)))
+
+     for current-form-length
+     = (sum-list (mapcar #'length (flatten-tree (yl-compile-form current-form))))
 
      ;; when we
      ;; (1) encounter a LABEL (that isnt on the first line)

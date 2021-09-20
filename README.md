@@ -33,6 +33,13 @@ YOLOLISP:
  (set e (* d (+ :c :b)))
  (set f (* a (* a (+ a a))))
 
+;; Looping!
+ (while (< :wout 5)
+   (set :wout (+ :wout 2)))
+
+ (for ((x 0) (<= x 3) (inc x))
+   (set :fout (* x x)))
+
  ;; Literal output for when YOLOLISP isn't enough
  (literal "\nz = e + f")
 
@@ -44,12 +51,24 @@ Compiles to YOLOL:
 ```
 a=10 :b=a++ if :b==11 then :c=1 end d=2*0^:c+1*:c e=d*(:c+:b)
 f=a*a*(a+a)
+if not :wout<5 then goto 4 end :wout+=2 goto 3
+x=0
+if not x<=3 then goto 6 end :fout=x*x x++ goto 5
+
 z = e + f //Made in YOLOLISP!
 ```
 
 ### Usage:
 
-Currently only invokable within Emacs. Use the `yl` macro like so:
+#### Shell:
+
+```bash
+./yololisp.sh inputfile.yololisp > myfile.yolol
+```
+
+#### In Emacs:
+
+Use the `yl` macro like so:
 
 ```lisp
 (yl
