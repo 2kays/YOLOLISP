@@ -149,17 +149,17 @@ Optionally supply a false-branch `FBRANCH'."
                  "="
                  (yl-compile-expr expr)))
 
-(defun yl-compile-op-assign (var op &optional expr)
-  "Compile OP-ASSIGN, with `OP', of `EXPR' to `VAR'."
+(defun yl-compile-unary-assign (var op)
+  "Compile UNARY-ASSIGN to `VAR' with `OP'."
+  ;; This will only get called for inc, dec, preinc, predec.
+  ;;
+  ;; We can piggyback on top of the expression compiler for this because
+  ;; inc/dec/preinc/predec are also valid expressions.
+  (yl-compile-expr `(,op ,var)))
+
+(defun yl-compile-binary-assign (op var expr)
+  "Compile BINARY-ASSIGN, with `OP', of `EXPR' to `VAR'."
   (cl-ecase op
-    ((inc dec)
-     (let ((op-string (cdr (assoc op yl-unary-right))))
-       (yl-join-exprs (symbol-name var)
-                      op-string)))
-    ((preinc predec)
-     (let ((op-string (cdr (assoc op yl-unary-left))))
-       (yl-join-exprs op-string
-                      (symbol-name var))))
     ((+ - * /)
      (yl-join-exprs (symbol-name var)
                     (format "%s=" op)
@@ -191,15 +191,18 @@ environment intact."
 Returns a list of lists of fragments."
   (let ((sym (car form)))
     (cl-ecase sym
-      (do     (yl-compile-do (cdr form)))
-      (if     (list (yl-compile-if (cadr form) (caddr form) (cadddr form))))
-      (assign (list (yl-compile-assign (cadr form) (caddr form))))
-      (op-assign (list (yl-compile-op-assign (cadr form) (caddr form) (cadddr form))))
-      (label  (list (yl-compile-label)))
-      (declare  (list (yl-compile-declare)))
-      (goto   (list (yl-compile-goto (cadr form))))
+      ;; Control-flow
+      (do    (yl-compile-do (cdr form)))
+      (goto  (list (yl-compile-goto (cadr form))))
+      (label (list (yl-compile-label)))
+      (if    (list (yl-compile-if (cadr form) (caddr form) (cadddr form))))
+      ;; Variable assignment
+      (assign        (list (yl-compile-assign (cadr form) (caddr form))))
+      (binary-assign (list (yl-compile-binary-assign (cadr form) (caddr form) (cadddr form))))
+      ((inc dec preinc predec) (yl-compile-unary-assign (cadr form) (car form)))
+      ;; Miscellaneous
       (literal (list (cadr form)))
-      ((inc dec preinc predec) (yl-compile-expr form)))))
+      (declare (list (yl-compile-declare))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; YOLOLISP-MACROS
@@ -225,7 +228,7 @@ Returns a list of lists of fragments."
          (assign-op (when (and (consp rvalue) (eq var (cadr rvalue)))
                       (car rvalue))))
     (if assign-op
-        (list 'op-assign var assign-op (caddr rvalue))
+        (list 'binary-assign assign-op var (caddr rvalue))
       (list 'assign var rvalue))))
 
 (defun yl-macro-set (form)
@@ -302,7 +305,7 @@ Returns a list of lists of fragments."
         (cl-ecase sym
           (do        `(do ,@(mapcar #'yl-macroexpand (cdr form))))
           (assign    `(assign ,(cadr form) ,(yl-macroexpand (caddr form))))
-          (op-assign `(op-assign ,(cadr form) ,(caddr form) ,(yl-macroexpand (cadddr form))))
+          (binary-assign `(binary-assign ,(cadr form) ,(caddr form) ,(yl-macroexpand (cadddr form))))
           (goto      `(goto ,(yl-macroexpand (cadr form))))
           (label     `(label ,(yl-macroexpand (cadr form))))
           (if        `(if ,(yl-macroexpand (cadr form))
@@ -477,7 +480,7 @@ lines based on their expected compiled YOLOL output.
     (cl-case sym
       (do        `(do ,@(yl-type-tagger-optimize-do (cdr form))))
       (assign    `(assign ,(cadr form) ,(yl-try-type-tag (caddr form))))
-      (op-assign `(op-assign ,(cadr form) ,(caddr form) ,(yl-try-type-tag (cadddr form))))
+      (binary-assign `(binary-assign ,(cadr form) ,(caddr form) ,(yl-try-type-tag (cadddr form))))
       (goto      `(goto ,(yl-try-type-tag (cadr form))))
       (if        `(if ,(yl-try-type-tag (cadr form))
                       ,(yl-type-tagger-optimize (caddr form))
@@ -536,7 +539,7 @@ lines based on their expected compiled YOLOL output.
     (cl-case sym
       (do        `(do ,@(mapcar #'yl-tag-stripper-optimize (cdr form))))
       (assign    `(assign ,(cadr form) ,(yl-ignore-expr-type-tag (caddr form))))
-      (op-assign `(op-assign ,(cadr form) ,(caddr form) ,(yl-ignore-expr-type-tag (cadddr form))))
+      (binary-assign `(binary-assign ,(cadr form) ,(caddr form) ,(yl-ignore-expr-type-tag (cadddr form))))
       (goto      `(goto ,(yl-ignore-expr-type-tag (cadr form))))
       (if        `(if ,(yl-ignore-expr-type-tag (cadr form))
                       ,(yl-tag-stripper-optimize (caddr form))
@@ -657,7 +660,7 @@ lines based on their expected compiled YOLOL output.
   (yl--test (yl* (assign a 1) (assign b 2)) '(("a=1" "b=2")) )
   (yl--test (yl* (if (== a 10) (assign b 4))) '(("if a==10 then b=4 end")))
   (yl--test (yl* (assign :a 10) (// "Comment!")) '((":a=10" "//Comment!")))
-  (yl--test (yl* (op-assign z * 2)) '(("z*=2")))
+  (yl--test (yl* (binary-assign * z 2)) '(("z*=2")))
   t)
 
 ;; macro expansion tests
