@@ -106,6 +106,7 @@ Use the `yl` macro like so:
    * Low hanging fruit optimizations:
      * Basic constant folding within expressions
      * Branchless optimizations for conditionals *[IN PROGRESS]*
+     * Infer +=,-=,*=,/= from assignments **[DONE]**
 
  * Compiler usability and accessibility
    * Replace ELPA/MELPA dependencies with built-in Emacs stuff **[DONE]**
@@ -115,8 +116,6 @@ Use the `yl` macro like so:
  * Misc. features:
    * Labels as goto targets **[DONE]**
      * Labels can be used as constants in exprs
-   * `set` macro should infer +=,-=,*=,/= **[DONE]**
-     * **ACTUALLY THIS IS DUMB.** This should be done as optimisation.
    * More useful macros and utilities
    * Interface with some YOLOL emulators
    * An Emacs YOLOLISP environment?

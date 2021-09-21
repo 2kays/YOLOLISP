@@ -193,16 +193,16 @@ Returns a list of lists of fragments."
     (cl-ecase sym
       ;; Control-flow
       (do    (yl-compile-do (cdr form)))
-      (goto  (list (yl-compile-goto (cadr form))))
-      (label (list (yl-compile-label)))
-      (if    (list (yl-compile-if (cadr form) (caddr form) (cadddr form))))
+      (goto  (yl-compile-goto (cadr form)))
+      (label (yl-compile-label))
+      (if    (yl-compile-if (cadr form) (caddr form) (cadddr form)))
       ;; Variable assignment
-      (assign        (list (yl-compile-assign (cadr form) (caddr form))))
-      (binary-assign (list (yl-compile-binary-assign (cadr form) (caddr form) (cadddr form))))
+      (assign        (yl-compile-assign (cadr form) (caddr form)))
+      (binary-assign (yl-compile-binary-assign (cadr form) (caddr form) (cadddr form)))
       ((inc dec preinc predec) (yl-compile-unary-assign (cadr form) (car form)))
       ;; Miscellaneous
-      (literal (list (cadr form)))
-      (declare (list (yl-compile-declare))))))
+      (literal (cadr form))
+      (declare (yl-compile-declare)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; YOLOLISP-MACROS
@@ -223,13 +223,8 @@ Returns a list of lists of fragments."
 
 (defun yl-transform-assign-pair (pair)
   (let* ((var    (car pair))
-         (rvalue (cadr pair))
-         ;; Pull out a potential assign operator
-         (assign-op (when (and (consp rvalue) (eq var (cadr rvalue)))
-                      (car rvalue))))
-    (if assign-op
-        (list 'binary-assign assign-op var (caddr rvalue))
-      (list 'assign var rvalue))))
+         (rvalue (cadr pair)))
+    `(assign ,var ,rvalue)))
 
 (defun yl-macro-set (form)
   (let* ((pairs (seq-partition (cdr form) 2))
@@ -508,26 +503,30 @@ lines based on their expected compiled YOLOL output.
 (defun yl-integer-p (expr)
   (eq (yl-get-expr-type-tag expr) 'integer))
 
-(defun yl-optimize-shortcut-if (condition tbranch fbranch)
+(defun yl-term-rewrite-if (form)
   "Optimise an IF `form'. Looks for common usage patterns and
   converts them to a branchless form."
-  (if (and (yl-integer-p condition)
-           (eq (cadr tbranch) (cadr fbranch))
-           (eq 'assign (car tbranch))
-           (yl-integer-p (caddr tbranch))
-           (eq 'assign (car fbranch))
-           (yl-integer-p (caddr tbranch)))
-      (let ((s (cadr condition))
-            (a (cadr (caddr fbranch)))
-            (b (cadr (caddr tbranch))))
-        `(assign ,(cadr tbranch) (+ (* ,a (^ 0 ,s)) (* ,b ,s))))
-    `(if ,condition ,tbranch ,fbranch)))
+  (pcase form
+    (`(if (integer ,condition)
+          (assign ,var (integer ,tval))
+        (assign ,var (integer ,fval)))
+     `(assign ,var (+ (* ,fval (^ 0 ,condition)) (* ,tval ,condition))))
+    (_ form)))
 
-(defun yl-optimize-shortcuts (form)
+(defun yl-term-rewrite-assign (form)
+  (cl-flet ((bin-op-p (op) (member op '(/ * + -))))
+    (pcase form
+      ((and `(assign ,var (,op ,var ,val))
+            (let (pred bin-op-p) op))
+       `(binary-assign ,op ,var ,val))
+      (_ form))))
+
+(defun yl-optimize (form)
   (let ((sym (car form)))
     (cl-case sym
-      (do `(do ,@(mapcar #'yl-optimize-shortcuts (cdr form))))
-      (if (yl-optimize-shortcut-if (cadr form) (caddr form) (cadddr form)))
+      (do     `(do ,@(mapcar #'yl-optimize (cdr form))))
+      (assign (yl-term-rewrite-assign form))
+      (if     (yl-term-rewrite-if form))
       (otherwise form))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -607,15 +606,15 @@ lines based on their expected compiled YOLOL output.
 
 (defun yl-fn (forms)
   (thread-first forms
+    ;; Expand macros
+    (yl-macroexpand)
+
     ;; Optimization
     (yl-type-tagger-optimize)
-    (yl-optimize-shortcuts)
+    (yl-optimize)
 
     ;; Optimization cleanup
     (yl-tag-stripper-optimize)
-
-    ;; Expand macros
-    (yl-macroexpand)
 
     ;; Collapse unnecessary nested DOs
     (yl-do-collapser)
