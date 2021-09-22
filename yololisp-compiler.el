@@ -517,7 +517,7 @@ lines based on their expected compiled YOLOL output.
   (cl-flet ((bin-op-p (op) (member op '(/ * + -))))
     (pcase form
       ((and `(assign ,var (,op ,var ,val))
-            (let (pred bin-op-p) op))
+            (guard (bin-op-p op)))
        `(binary-assign ,op ,var ,val))
       (_ form))))
 
@@ -583,19 +583,25 @@ lines based on their expected compiled YOLOL output.
 (defun yl-goto-label-resolver (lines)
   ""
   (let ((line-label-rlookup (label-thinger lines)))
-    (cl-labels ((fixify-gotos (form)
-                              (cl-case (car form)
-                                (label nil)
-                                (goto (list (let* ((goto-expr (cadr form))
-                                                   (label-line (rassoc goto-expr line-label-rlookup)))
-                                              (if (eq goto-expr (cdr label-line))
-                                                  `(goto ,(car label-line))
-                                                form))))
-                                (do (list `(do ,@(mapcan #'fixify-gotos (cdr form)))))
-                                (if (list `(if ,(cadr form)
-                                               ,@(mapcan #'fixify-gotos (cddr form))
-                                             ,@(mapcan #'fixify-gotos (cdddr form)))))
-                                (t (list form)))))
+    (cl-labels
+        ((replace-labels-in-expr (expr)
+                                 (if (consp expr)
+                                     (mapcar #'replace-labels-in-expr expr)
+                                   (let* ((sym expr)
+                                          (label-line (rassoc sym line-label-rlookup)))
+                                     (if (eq sym (cdr label-line))
+                                         (car label-line)
+                                       sym))))
+         (fixify-gotos (form)
+                       (cl-case (car form)
+                         (label nil)
+                         (goto (list (let* ((goto-expr (cadr form)))
+                                       `(goto ,(replace-labels-in-expr goto-expr)))))
+                         (do (list `(do ,@(mapcan #'fixify-gotos (cdr form)))))
+                         (if (list `(if ,(cadr form)
+                                        ,@(mapcan #'fixify-gotos (cddr form))
+                                      ,@(mapcan #'fixify-gotos (cdddr form)))))
+                         (t (list form)))))
       (mapcar #'(lambda (line)
                   (mapcan #'fixify-gotos line))
               lines))))
@@ -756,6 +762,66 @@ lines based on their expected compiled YOLOL output.
                  (goto lbl)
                  (goto xd))
             '((":out=0") (":out+=1" "goto 2" "goto xd")))
+  t)
+
+;; README program sanity check
+(progn
+  (yl--test (yl*
+             ;; Declarations are optional, but useful for hinting the optimizer.
+             ;; In this case, the if-statement later can be made branchless.
+             (declare (type integer :c e))
+
+             ;; Assignment
+             (set a  10
+                  :b (inc a))
+
+             ;; Simple WHEN conditional
+             (when (== :b 11)
+               (set :c 1))
+
+             ;; IF conditional (optimisable into a branchless form)
+             (if :c
+                 (assign d 1)
+               (assign d 2))
+
+             ;; Arithmetic expressions
+             (set e (* d (+ :c :b)))
+             (set f (* a (* a (+ a a))))
+
+             ;; Looping!
+             (while (< :wout 5)
+               (set :wout (+ :wout 2)))
+
+             (for ((x 0) (<= x 3) (inc x))
+                  (set :fout (* x x)))
+
+             ;; Literal output for when YOLOLISP isn't enough
+             (literal "\nz = e + f")
+
+             ;; Lisp comment vs. output YOLOL comment
+             (// "Made in YOLOLISP!"))
+            '(("a=10" ":b=a++" "if :b==11 then :c=1 end" "d=2*0^:c+1*:c" "e=d*(:c+:b)") ("f=a*a*(a+a)") ("if not :wout<5 then goto 4 end" ":wout+=2" "goto 3") ("x=0") ("if not x<=3 then goto 6 end" ":fout=x*x" "x++" "goto 5") ("
+z = e + f" "//Made in YOLOLISP!")))
+
+  (yl--test (yl*
+             (label a)
+             (goto (+ a 3))
+             (label b)
+             (set :out1 1)
+             (label c)
+             (set :out2 2)
+             (label d)
+             (set :out3 3)
+             (label e)
+             (set :out4 4))
+            '(("goto 1+3") (":out1=1") (":out2=2") (":out3=3") (":out4=4")))
+
+  (yl--test (yl*
+             (label one)
+             (goto (* (+ 1 (- 1 one)) 2))
+             (label two)
+             (set :done 1))
+            '(("goto (1+(1-1))*2") (":done=1")))
   t)
 
 (provide 'yololisp-compiler)
