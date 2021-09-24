@@ -560,50 +560,53 @@ lines based on their expected compiled YOLOL output.
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; LABEL AND GOTO "HANDLER"
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
-;; TODO: clean up this crap
-;;
+;; Resolves references to LABEL names within GOTO expressions, translating label
+;; names to line numbers. Labe lnames effectively act as constants in
+;; expressions.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defun label-thinger (lines)
-  ""
+(defun build-label-lookup (lines)
+  "Build a lookup of labels->line numbers.
+`LINES' should be in the post-form-rearrangement line-centric format."
   (seq-map-indexed
    (lambda (line n)
-     (cons (1+ n)
-           ;; grab first label for line, one label per line PEOPLE! :)
-           (cadar
+     (cons (cadar
+            ;; grab first label for line, one label per line PEOPLE! :)
             (seq-filter (lambda (form)
                           (and (consp form)
                                (eq 'label (car form))))
-                        line))))
-
+                        line))
+           (1+ n)))
    lines))
 
+(defun yl-resolve-labels-in-expr (line-lookup expr)
+  "Resolve labels to line numbers in `EXPR'.
+Lookup requires the `LINE-LOOKUP' association list."
+  (if (consp expr)
+      (mapcar (apply-partially #'yl-resolve-labels-in-expr line-lookup) expr)
+    (let* ((sym expr)
+           (label-line (assoc sym line-lookup)))
+      (if (eq sym (car label-line))
+          (cdr label-line)
+        sym))))
+
 (defun yl-goto-label-resolver (lines)
-  ""
-  (let ((line-label-rlookup (label-thinger lines)))
+  "Resolve GOTO forms referencing LABELs in their expression.
+`LINES' should be in the post-form-rearrangement line-centric format."
+  (let ((labels-to-lines (build-label-lookup lines)))
     (cl-labels
-        ((replace-labels-in-expr (expr)
-                                 (if (consp expr)
-                                     (mapcar #'replace-labels-in-expr expr)
-                                   (let* ((sym expr)
-                                          (label-line (rassoc sym line-label-rlookup)))
-                                     (if (eq sym (cdr label-line))
-                                         (car label-line)
-                                       sym))))
-         (fixify-gotos (form)
+        ((resolve-goto (form)
                        (cl-case (car form)
-                         (label nil)
                          (goto (list (let* ((goto-expr (cadr form)))
-                                       `(goto ,(replace-labels-in-expr goto-expr)))))
-                         (do (list `(do ,@(mapcan #'fixify-gotos (cdr form)))))
+                                       `(goto ,(yl-resolve-labels-in-expr labels-to-lines goto-expr)))))
+                         (do (list `(do ,@(mapcan #'resolve-goto (cdr form)))))
                          (if (list `(if ,(cadr form)
-                                        ,@(mapcan #'fixify-gotos (cddr form))
-                                      ,@(mapcan #'fixify-gotos (cdddr form)))))
+                                        ,@(mapcan #'resolve-goto (cddr form))
+                                      ,@(mapcan #'resolve-goto (cdddr form)))))
                          (t (list form)))))
       (mapcar #'(lambda (line)
-                  (mapcan #'fixify-gotos line))
+                  (mapcan #'resolve-goto line))
               lines))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -750,10 +753,10 @@ lines based on their expected compiled YOLOL output.
                ((set a 0 b 100))
                ((label x) (set a (+ a 1)) (goto y))
                ((label y) (label z) (set b (+ b 1)) (goto x))))
-            '(((do (set q p)))
+            '(((label e) (do (set q p)))
               ((set a 0 b 100))
-              ((set a (+ a 1)) (goto 4))
-              ((set b (+ b 1)) (goto 3))))
+              ((label x) (set a (+ a 1)) (goto 4))
+              ((label y) (label z) (set b (+ b 1)) (goto 3))))
 
   ;; goto resolution full test
   (yl--test (yl* (set :out 0)
@@ -762,6 +765,27 @@ lines based on their expected compiled YOLOL output.
                  (goto lbl)
                  (goto xd))
             '((":out=0") (":out+=1" "goto 2" "goto xd")))
+
+  ;; label names resolving as constants
+  (yl--test (yl*
+             (label a)
+             (goto (+ a 3))
+             (label b)
+             (set :out1 1)
+             (label c)
+             (set :out2 2)
+             (label d)
+             (set :out3 3)
+             (label e)
+             (set :out4 4))
+            '(("goto 1+3") (":out1=1") (":out2=2") (":out3=3") (":out4=4")))
+
+  (yl--test (yl*
+             (label one)
+             (goto (* (+ 1 (- 1 one)) 2))
+             (label two)
+             (set :done 1))
+            '(("goto (1+(1-1))*2") (":done=1")))
   t)
 
 ;; README program sanity check
@@ -802,26 +826,6 @@ lines based on their expected compiled YOLOL output.
              (// "Made in YOLOLISP!"))
             '(("a=10" ":b=a++" "if :b==11 then :c=1 end" "d=2*0^:c+1*:c" "e=d*(:c+:b)") ("f=a*a*(a+a)") ("if not :wout<5 then goto 4 end" ":wout+=2" "goto 3") ("x=0") ("if not x<=3 then goto 6 end" ":fout=x*x" "x++" "goto 5") ("
 z = e + f" "//Made in YOLOLISP!")))
-
-  (yl--test (yl*
-             (label a)
-             (goto (+ a 3))
-             (label b)
-             (set :out1 1)
-             (label c)
-             (set :out2 2)
-             (label d)
-             (set :out3 3)
-             (label e)
-             (set :out4 4))
-            '(("goto 1+3") (":out1=1") (":out2=2") (":out3=3") (":out4=4")))
-
-  (yl--test (yl*
-             (label one)
-             (goto (* (+ 1 (- 1 one)) 2))
-             (label two)
-             (set :done 1))
-            '(("goto (1+(1-1))*2") (":done=1")))
   t)
 
 (provide 'yololisp-compiler)

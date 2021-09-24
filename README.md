@@ -115,7 +115,7 @@ Use the `yl` macro like so:
 
  * Misc. features:
    * Labels as goto targets **[DONE]**
-     * Labels can be used as constants in exprs
+     * Labels can be used as constants in exprs **[DONE]**
    * More useful macros and utilities
    * Interface with some YOLOL emulators
    * An Emacs YOLOLISP environment?
@@ -125,7 +125,7 @@ Use the `yl` macro like so:
      * FOR loop **[DONE]**
    * Smarter type inferencing?!
    * Generic output literal for greater control **[DONE]**
-   * Vector/Matrix helper macros (see advmath.el) **[IN-PROGRESS]**
+   * Vector/Matrix helper macros (see advmath.el) *[IN-PROGRESS]*
 
  * Documentation, cleanup, maintenance
    * Clean up the unary operator code...
