@@ -29,9 +29,10 @@ Set this to \" \" for more readable YOLOL output.")
                        / *
                        < > == != <= >=
                        + -
-                       not
                        or
-                       and)
+                       and
+                       not ;; a Starbase bug requires us to parenthesize 'not'
+                       )
       (nreverse)
       (seq-map-indexed #'cons)))
   "Alist mapping operators to operator-precedences.")
@@ -87,10 +88,15 @@ need parens."
                           (cond
                            ;; one argument operation, value on left
                            (left-one-arg-op
-                            (concat left-one-arg-op (yl-compile-expr arg1)))
+                            (yl-try-parenthesize
+
+                             last-precedence op
+                             (concat left-one-arg-op (yl-compile-expr arg1))))
                            ;; one argument operation, value on right
                            (right-one-arg-op
-                            (concat (yl-compile-expr arg1) right-one-arg-op))
+                            (yl-try-parenthesize
+                             last-precedence op
+                             (concat (yl-compile-expr arg1) right-one-arg-op)))
                            ;; two-arg binary operation
                            (t
                             (let ((op-precedence (yl-get-precedence op)))
@@ -459,12 +465,14 @@ lines based on their expected compiled YOLOL output.
                       type-decls)))
     (car (rassoc sym var-lookup))))
 
-(defun yl-try-type-tag (sym)
-  (if-let ((var-type (yl-lookup-var-type sym)))
-      (list var-type sym)
-    (if (integerp sym)
-        `(integer ,sym)
-      sym)))
+(defun yl-try-type-tag (atom)
+  (if-let ((var-type (yl-lookup-var-type atom)))
+      (list var-type atom)
+    (cl-typecase atom
+      (integer `(integer ,atom))
+      (float   `(float ,atom))
+      (string  `(string ,atom))
+      (t       atom))))
 
 (defun yl-type-tagger-optimize-do (forms)
   (with-decl-env (forms)
