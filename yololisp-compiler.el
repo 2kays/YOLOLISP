@@ -73,40 +73,54 @@ This only occurs iff `OP's precedence is lower than
     (fact . "!"))
   "Unary operators on right-side of value.")
 
+(defun yl-binopify-expr (expr)
+  "Transform non-binop `EXPR' call to a nested binop call.
+i.e. (OP ARG1 ARG2 ...) to (OP ARG1 (OP ARG2 ...)).
+Works for / * + - operations."
+  (if (consp expr)
+      (let ((op   (car expr))
+            (args (mapcar #'yl-binopify-expr (cdr expr))))
+        (if (and (member op '(/ * + -))
+                 (> (length args) 2))
+            `(,op ,(car args) ,(yl-binopify-expr `(,op ,@(cdr args))))
+          expr))
+    expr))
+
 (cl-defun yl-compile-expr (expr &optional (last-precedence 0))
   "Compiles a YOLOLISP expression `EXPR'.
 `LAST-PRECEDENCE' is the precedence of the parent operation; if
 this is a higher precedence operation then parentheses won't be
-added.  0 is the seed precedence since top level exprs dont't
+added.  0 is the seed precedence since top level exprs don't
 need parens."
   (cl-etypecase expr
-    (cons (let ((result (let* ((op (car expr))
-                               (arg1 (cadr expr))
-                               (arg2 (caddr expr))
-                               (left-one-arg-op (cdr (assoc op yl-unary-left)))
-                               (right-one-arg-op (cdr (assoc op yl-unary-right))))
-                          (cond
-                           ;; one argument operation, value on left
-                           (left-one-arg-op
-                            (yl-try-parenthesize
-
-                             last-precedence op
-                             (concat left-one-arg-op (yl-compile-expr arg1))))
-                           ;; one argument operation, value on right
-                           (right-one-arg-op
-                            (yl-try-parenthesize
-                             last-precedence op
-                             (concat (yl-compile-expr arg1) right-one-arg-op)))
-                           ;; two-arg binary operation
-                           (t
-                            (let ((op-precedence (yl-get-precedence op)))
-                              (yl-try-parenthesize
-                               last-precedence op
-                               (yl-join-exprs (yl-compile-expr arg1 op-precedence)
-                                              (symbol-name op)
-                                              (yl-compile-expr arg2 op-precedence))))))
-                          )))
-            result))
+    (cons (let* ((op (car expr))
+                 (arg1 (cadr expr))
+                 (arg2 (caddr expr))
+                 (left-one-arg-op (cdr (assoc op yl-unary-left)))
+                 (right-one-arg-op (cdr (assoc op yl-unary-right))))
+            (cond
+             ;; one argument operation, value on left
+             (left-one-arg-op
+              (yl-try-parenthesize
+               last-precedence op
+               (concat left-one-arg-op (yl-compile-expr arg1))))
+             ;; one argument operation, value on right
+             (right-one-arg-op
+              (yl-try-parenthesize
+               last-precedence op
+               (concat (yl-compile-expr arg1) right-one-arg-op)))
+             ;; two-arg binary operation
+             (t
+              (let* ((op-precedence (yl-get-precedence op))
+                     (binopified-expr (yl-binopify-expr expr))
+                     (top   (car binopified-expr))
+                     (targ1 (cadr binopified-expr))
+                     (targ2 (caddr binopified-expr)))
+                (yl-try-parenthesize
+                 last-precedence top
+                 (yl-join-exprs (yl-compile-expr targ1 op-precedence)
+                                (symbol-name top)
+                                (yl-compile-expr targ2 op-precedence))))))))
     (symbol  (symbol-name expr))
     (string  (replace-regexp-in-string "\n" "\\\\n" (concat "\"" expr "\"")))
     (integer (number-to-string expr))
@@ -242,10 +256,11 @@ Returns a list of lists of fragments."
 
 ;; cheap trashy YOLOLISP gensym
 (defvar *ylgensym-counter* 0)
-(defun yl-gensym ()
+(defun yl-gensym (&optional str)
   ""
-  (intern (concat "YL" (number-to-string
-                        (cl-incf *ylgensym-counter*)))))
+  (intern (concat (or str "G")
+                  (number-to-string
+                   (cl-incf *ylgensym-counter*)))))
 
 (defun yl-macro-while (form)
   (let ((lbl-start  (yl-gensym))
@@ -669,6 +684,8 @@ Lookup requires the `LINE-LOOKUP' association list."
 (progn
   (yl--test (yl-compile-expr '(== a (+ (+ 10 10) (+ 12 11)))) "a==(10+10+12+11)")
   (yl--test (yl-compile-expr '(== :a :b)) ":a==:b")
+  (yl--test (yl-compile-expr '(+ a b c)) "a+b+c")
+  (yl--test (yl-compile-expr '(+ a b c (* d e f g) h j (* k (+ n o p)))) "a+b+c+d*e*f*g+h+j+k*(n+o+p)")
   t)
 
 ;; primitive statement compiler tests
