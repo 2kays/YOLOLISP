@@ -1,0 +1,33 @@
+;; Declarations are optional, but useful for hinting the optimizer.
+;; In this case, the if-statement later can be made branchless.
+(declare (type integer :c e))
+
+;; Assignment
+(set a  10
+     :b (inc a))
+
+;; Simple WHEN conditional
+(when (== :b 11)
+  (set :c 1))
+
+;; IF conditional (optimisable into a branchless form)
+(if :c
+    (assign d 1)
+  (assign d 2))
+
+;; Arithmetic expressions
+(set e (* d (+ :c :b)))
+(set f (* a (* a (+ a a))))
+
+; Looping!
+(while (< :wout 5)
+  (set :wout (+ :wout 2)))
+
+(for ((x 0) (<= x 3) (inc x))
+  (set :fout (* x x)))
+
+;; Literal output for when YOLOLISP isn't enough
+(literal "\nz = e + f")
+
+;; Lisp comment vs. output YOLOL comment
+(// "Made in YOLOLISP!")

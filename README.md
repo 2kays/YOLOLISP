@@ -11,40 +11,39 @@ Written in Emacs Lisp (...I was too lazy to set up a Common Lisp environment)
 YOLOLISP:
 
 ```elisp
-(yl
- ;; Declarations are optional, but useful for hinting the optimizer.
- ;; In this case, the if-statement later can be made branchless.
- (declare (type integer :c e))
+;; Declarations are optional, but useful for hinting the optimizer.
+;; In this case, the if-statement later can be made branchless.
+(declare (type integer :c e))
 
- ;; Assignment
- (set a  10
-      :b (inc a))
+;; Assignment
+(set a  10
+     :b (inc a))
 
- ;; Simple WHEN conditional
- (when (== :b 11)
-   (set :c 1))
+;; Simple WHEN conditional
+(when (== :b 11)
+  (set :c 1))
 
- ;; IF conditional (optimisable into a branchless form)
- (if :c
-     (assign d 1)
-   (assign d 2))
+;; IF conditional (optimisable into a branchless form)
+(if :c
+    (assign d 1)
+  (assign d 2))
 
- ;; Arithmetic expressions
- (set e (* d (+ :c :b)))
- (set f (* a (* a (+ a a))))
+;; Arithmetic expressions
+(set e (* d (+ :c :b)))
+(set f (* a (* a (+ a a))))
 
-;; Looping!
- (while (< :wout 5)
-   (set :wout (+ :wout 2)))
+; Looping!
+(while (< :wout 5)
+  (set :wout (+ :wout 2)))
 
- (for ((x 0) (<= x 3) (inc x))
-   (set :fout (* x x)))
+(for ((x 0) (<= x 3) (inc x))
+  (set :fout (* x x)))
 
- ;; Literal output for when YOLOLISP isn't enough
- (literal "\nz = e + f")
+;; Literal output for when YOLOLISP isn't enough
+(literal "\nz = e + f")
 
- ;; Lisp comment vs. output YOLOL comment
- (// "Made in YOLOLISP!"))
+;; Lisp comment vs. output YOLOL comment
+(// "Made in YOLOLISP!"))
 ```
 
 Compiles to YOLOL:
@@ -62,13 +61,15 @@ z = e + f //Made in YOLOLISP!
 
 #### Shell:
 
+Take the example file above and save it as `inputfile.yololisp`, and run:
+
 ```bash
 ./yololisp.sh inputfile.yololisp > myfile.yolol
 ```
 
-#### In Emacs:
+#### In Emacs (REPL or \*scratch\*):
 
-Use the `yl` macro like so:
+Use the `yl` macro to wrap your input like so:
 
 ```lisp
 (yl

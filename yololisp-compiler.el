@@ -318,7 +318,7 @@ Returns a list of lists of fragments."
   (if-let ((sym (and (consp form) (car form))))
       (if (yl-get-macro sym)
           (yl-macroexpand (yl-expand-macro form))
-        (cl-ecase sym
+        (cl-case sym
           (do        `(do ,@(mapcar #'yl-macroexpand (cdr form))))
           (assign    `(assign ,(cadr form) ,(yl-macroexpand (caddr form))))
           (binary-assign `(binary-assign ,(cadr form) ,(caddr form) ,(yl-macroexpand (cadddr form))))
@@ -355,7 +355,7 @@ Doesn't attempt to collapse DOs with an associated DECLARE."
 (defun yl-do-collapser (form)
   "Collapse simple DO blocks within `FORM'."
   (if-let ((sym (and (consp form) (car form))))
-      (cl-ecase sym
+      (cl-case sym
         (do `(do ,@(collapse-do-forms (cdr form))))
         (otherwise form))
     form))
